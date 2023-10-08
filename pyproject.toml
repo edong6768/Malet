@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "malt"
+version = "0.0.1"
+description = "MaLT: a tool for machine learning research"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+keywords = ["machine learning", "experiment", "plot"]
+authors = [
+  {name = "Dongyeop Lee", email = "dylee23@postech.ac.kr"},
+]
+classifiers = [
+    "Intended Audience :: Researchers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+]
+
+dependencies = [
+    'absl-py==1.0.0',
+    'numpy==1.22.0',
+    'pandas==2.0.3',
+    'matplotlib==3.7.0',
+    'ml-collections==0.1.0',
+    'seaborn==0.11.2',
+]
+
+[project.urls]
+Repository = "https://github.com/edong6768/MaLT.git"
+
+[tool.setuptools]
+packages = ["malt", "malt.plot_utils"]
+package-dir = {""="src"}
