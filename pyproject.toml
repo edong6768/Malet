@@ -3,9 +3,9 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "malt"
-version = "0.0.1"
-description = "MaLT: a tool for machine learning research"
+name = "malet"
+version = "0.1.0"
+description = "Malet: a tool for machine learning experiment"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
@@ -34,8 +34,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/edong6768/MaLT.git"
+Repository = "https://github.com/edong6768/Malet.git"
 
 [tool.setuptools]
-packages = ["malt", "malt.plot_utils"]
+packages = ["malet", "malet.plot_utils"]
 package-dir = {""="src"}

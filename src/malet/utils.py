@@ -39,15 +39,18 @@ def box_str(title: str, content: str,
     
 def str2value(value_str):
     """Casts string to corresponding field type"""
+    if not isinstance(value_str, str): return value_str
+    
     value_str = value_str.strip()
     # list
     if '[' in value_str:
       return [str2value(v) for v in value_str[1:-1].split(',')]
     # float
-    elif re.match('-?\d*\.\d*', value_str):
+    elif (m:=re.findall('-?\d*\.\d*', value_str)) and len(m)==1:
       return float(value_str)
     # int
-    elif re.match('-?\d+', value_str):
+    elif (m:=re.findall('-?\d+', value_str)) and len(m)==1:
       return int(value_str)
     return value_str
 
+print(str2value)
