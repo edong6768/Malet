@@ -4,10 +4,10 @@
 
 The following features are provided:
 
-- yaml-based hyperparameter configuring w/ grid execution syntax
+- Simple YAML-based hyperparameter configuration w/ grid search syntax
 - Experiment logging and resuming system
-- Automatic plotting CLI tool
-- Parallel friendly experiment splitting
+- User-friendly command-line tool for flexible graphing and easy data extraction from experiment logs
+- Efficient parallelization by splitting a sequence of experiments over GPU jobs
 
 ## Installation
 
@@ -21,7 +21,7 @@ pip install git+https://github.com/edong6768/MaLT.git
 
 - absl-py 1.0.0
 - numpy 1.22.0
-- pandas 1.4.2
+- pandas 2.0.3
 - matplotlib 3.7.0
 - ml-collections 0.1.0
 - seaborn 0.11.2
@@ -41,7 +41,8 @@ pip install git+https://github.com/edong6768/MaLT.git
 1. [Advanced gridding in yaml](#advanced-gridding-in-yaml)
 2. [Advanced plot making](#advanced-plot-making)
 3. [Parallel friendly grid splitting](#parallel-friendly-grid-splitting)
-4. [Merging multiple log files](#merging-multiple-log-files)
+4. [Saving logs in intermediate epochs](#saving-logs-in-intermediate-epochs)
+5. [Merging multiple log files](#merging-multiple-log-files)
 
 ## Quick start
 
@@ -98,14 +99,13 @@ batch_size: 128
 optimizer: adam
 
 # grided fields
-grid_fields: [seed, lr, weight_decay]
 grid:
     seed: [1, 2, 3]
     lr: [0.0001, 0.001, 0.01, 0.1]
     weight_decay: [0.0, 0.00005, 0.0001]
 ```
 
-Specifying list of config values under `grid` lets you run all possible combination (*i.e.* grid) of your configurations, with field least frequently changing in the order of `grid_field`.
+Specifying list of config values under `grid` lets you run all possible combination (*i.e.* grid) of your configurations, with field least frequently changing in the order of declaration in `grid`.
 
 #### Running experiments
 
@@ -138,6 +138,8 @@ df = log.df
 ```
 
 Experiment logs also enables resuming to the most recently run config when a job is suddenly killed.
+Note that this only enable you to resume from the begining of the training.
+For resuming from intermediate log checkpoints, check out [Log checkpointing](#log-checkpointing).
 
 ### 3. Plot making
 
@@ -232,16 +234,16 @@ This can be done using the following arguments.
     ```
 
     - `line_style`: Style of the plotted line (`linewidth`, `marker`, `markersize`, `markevery`)
-    - `ax_style`: Style of the figure. [most attribute of `matplotlib.axes.Axes` object](https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html#matplotlib.axes.Axes) can be setted as follows:
+    - `ax_style`: Style of the figure. [Most attribute of `matplotlib.axes.Axes` object](https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.html#matplotlib.axes.Axes) can be set as follows:
 
       ```yaml
-      grid: [parg1, parg2, {'kwarg1': v1, 'kwarg2': v2}]
+      yscale: [parg1, parg2, {'kwarg1': v1, 'kwarg2': v2}]
       ```
 
       is equivalent to running
 
       ```python
-      ax.set_grid(parg1, parg2, kwarg1=v1, kwarg2=v2)
+      ax.set_yscale(parg1, parg2, kwarg1=v1, kwarg2=v2)
       ```
 
 For more details, go to [Advanced plot making](#advanced-plot-making) section.
@@ -353,6 +355,11 @@ This argument lets you specify on which value of `x_field` to choose the best hy
     ```
 
 #### 2. Advanced yaml plot config
+
+#### More details on ax_style keyword
+
+Unlike other fields, `frame_width, fig_size, tick_params, legend, grid` are not attributes of `Axes` but are enabled for convinience.
+From these, `frame_width` and `fig_size` should be set as a number, while others can be similarly used like the rest of the attributes in `Axes`.
 
 #### Default style
 
@@ -473,7 +480,7 @@ from malt.experiment import Experiment
 FLAGS = flags.FLAGS
 def main(argv):
   ...
-  experiment = Experiment({exp_folder_path}, train_fn, metric_fields
+  experiment = Experiment({exp_folder_path}, train_fn, metric_fields,
                           total_splits=FLAGS.total_splits,
                           curr_splits=FLAGS.curr_splits,
                           auto_update_tsv=FLAGS.auto_update_tsv,
@@ -532,7 +539,7 @@ if __name__=='__main__':
 
     Both of these split methods result in multiple `.tsv` files, which is saved in `{exp_folder}/log_splits/split_{i}.tsv` folder.
 
-**Comments on `auto_update_tsv` argument.** 
+**Comments on `auto_update_tsv` argument.**
 
 `auto_update_tsv` is used for 'Current run checking' stated in the next section, but using it in 'Partitioning' doesn't cause problems.
 However we advise to not use it by adding since additional read/writing adds unnessacery computation time, especially as the `log.tsv` file grows larger.
@@ -549,7 +556,7 @@ python experiment_util.py ./experiments/{exp_folder} --workdir=./logdir \
 --configs_save
 ```
 
-This method requires the keyword `auto_update_tsv=True` to automatically read/write tsv files after a job starts/finishes running a config.
+This method requires the keyword `auto_update_tsv=True` in `Experiment` to automatically read/write tsv files after a job starts/finishes running a config.
 
 One adventage of 'Queueing' over 'Partitioning' is that you can freely allocate/deallocate new GPUs while running an experiment.
 
@@ -570,6 +577,92 @@ do
     --configs_save
 done
 ```
+
+### Saving logs in intermediate epochs
+
+We checkpoint training state so that we can resume training in the event of an unexpected termination.
+We can also checkpoint the experiment log so that we don't have to retrain a certain config to re-evaluate the metrics.
+
+#### Training pipeline
+
+For this, we need to add `exp_log` argument in `train` function for checkpointing the experiment log, where you can use it to add the following code for retrieveing/saving intermediate metric dictionary from/to the `tsv` file.
+
+```python
+import os
+
+def get_ckpt_dir(config):
+    ...
+    return ckpt_dir
+
+def get_ckpt(ckpt_dir):
+    ...
+    return ckpt
+
+def train(config, experiment, ...):
+
+    ... # set up
+    
+    # retrieve model/trainstate checkpoint if there exists
+    # these are just placeholders for the logic
+    ckpt_epoch = 0
+    ckpt_dir = get_ckpt_dir(config)
+    if os.path.exists(ckpt_dir)
+      ckpt = get_ckpt(ckpt_dir)
+      ckpt_epoch = ckpt.epoch
+    
+    ############# retrieve log checkpoint if there exists #############
+    metric_dict = {
+        'train_accuracies': [],
+        'val_accuracies': [],
+        'train_losses': [],
+        'val_losses': [],
+    }
+    if config in experiment.log:
+      metric_dict = experiment.get_log_checkpoint(config, metric_dict)
+    ###################################################################
+    ...
+    # training happens here
+    for epoch in range(config.ckpt_epoch, config.epochs):
+      
+      ... # train
+      
+      ... # update metric_dict
+
+      if not epoch % config.ckpt_every:
+
+        ... # train state, model checkpoint
+
+        ####################### checkpoint log #######################
+        experiment.update_log(metric_dict, configs=config) 
+        ##############################################################
+    ...
+
+    return metric_dict
+```
+
+The `ExperimentLog.get_log_checkpoint` method retrieves the `metric_dict` based on the `status` field in the dataframe.
+|status|Description|Behavior when resumed|
+|:----:|-----------|--------|
+| `R`  | Currently running | Get skipped |
+| `F`  | Failed while running | Rerun and `metric_dict` is retrieved |
+| `C`  | Completed | Get skipped |
+
+Before resuming the experiment after abrupt halt, you need to **manually find the row in the `log.tsv` file corresponding to the halted job and change the `status` from `R` (running) to `F` (falied)**.
+
+#### Running experiment
+
+```python
+from functools import partial
+from malt.experiment import Experiment
+
+train_fn = partial(train, ...{other arguments besides config & exp_log}..)
+metric_fields =  ['train_accuracies', 'val_accuracies', 'train_losses', 'val_losses']
+experiment = Experiment({exp_folder_path}, train_fn, metric_fields, 
+                        checkpoint=True, auto_update_tsv=True) 
+experiment.run()
+```
+
+You should add `checkpoint=True, auto_update_tsv=True` when instanciating `Experiment`.
 
 ### Merging multiple log files
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "malt"
-version = "0.0.1"
+version = "0.1.0"
 description = "MaLT: a tool for machine learning research"
 readme = "README.md"
 requires-python = ">=3.8"
