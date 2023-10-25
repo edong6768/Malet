@@ -20,7 +20,7 @@ pip install malet
 or from this repository.
 
 ```bash
-pip install https://github.com/edong6768/Malet.git
+pip install git+https://github.com/edong6768/Malet.git
 ```
 
 ## Dependencies
