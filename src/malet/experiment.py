@@ -179,9 +179,9 @@ class ExperimentLog:
                metric_fields=metric_fields, auto_update_tsv = auto_update_tsv)
 
   @classmethod
-  def from_tsv(cls, logs_file: str, info_fields: list, auto_update_tsv: bool=True):
+  def from_tsv(cls, logs_file: str, auto_update_tsv: bool=True):
     '''open tsv with yaml header'''
-    return cls(**cls.parse_tsv(logs_file), logs_file=logs_file, info_fields=info_fields, auto_update_tsv=auto_update_tsv)
+    return cls(**cls.parse_tsv(logs_file), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
   
   
   # tsv handlers.
@@ -224,7 +224,8 @@ class ExperimentLog:
         # df[list_fields] = df[list_fields].applymap(lambda s: [*map(float, s[1:-1].split(','))] if isinstance(s, str) else s)
       
     return {'static_configs': static_configs,
-            'grid_fields': idx[1:], 
+            'grid_fields': idx[1:],
+            'info_fields': list(df),
             'df': df}
   
 

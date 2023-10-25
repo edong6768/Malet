@@ -11,10 +11,16 @@ The following features are provided:
 
 ## Installation
 
-You can install Malet from this repository.
+You can install Malet using pip,
 
 ```bash
-pip install git+https://github.com/edong6768/Malet.git
+pip install malet
+```
+
+or from this repository.
+
+```bash
+pip install https://github.com/edong6768/Malet.git
 ```
 
 ## Dependencies
@@ -146,7 +152,7 @@ For resuming from intermediate log checkpoints, check out [Log checkpointing](#l
 Running `malet.plot` lets you make plots based on `log.tsv` in the experiment folder.
 
 ```bash
-python -m malet.plot \
+malet-plot \
 -exp_folder ../experiments/{exp_folder} \
 -mode curve-epoch-train_accuracy
 ```
@@ -408,7 +414,7 @@ You can specify a set of arguments for `malet.plot` in the yaml file and give it
 ```
 
 ```bash
-python -m malet.plot \
+malet-plot \
 -exp_folder ../experiments/{exp_folder} \
 -mode sam_rho
 ```

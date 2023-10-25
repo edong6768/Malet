@@ -103,7 +103,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         return fig, ax, y_label, save_name
         
-def main(argv):
+def run(argv):
     if len(argv)>2:
         raise app.UsageError('Too many command-line arguments.')
     
@@ -129,9 +129,7 @@ def main(argv):
     save_figure(fig, save_dir, save_name)
     logging.info(f'save plot as {save_dir}/{save_name}.pdf')
     
-if __name__=='__main__':
-    # flags.DEFINE_string('workdir', './logdir', "Workding directory to save model and tensorboard data")
-
+def main():
     flags.DEFINE_string('exp_folder', '', "Experiment folder path.")
     
     flags.DEFINE_string('mode', 'curve-epoch-val_loss', "Plot mode.")
@@ -144,4 +142,8 @@ if __name__=='__main__':
     flags.DEFINE_string('colors', '', "color scheme ('', 'cont').")
     flags.DEFINE_bool('annotate', True, 'Run multiple plot according to given config.')
 
-    app.run(main)
+    app.run(run)
+    
+    
+if __name__=='__main__':
+    main()
