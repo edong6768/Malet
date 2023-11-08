@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from .experiment import Experiment, ExperimentLog
-from .utils import str2value
+from .utils import str2value, box_str
 
 from .plot_utils.metric_drawer import *
 from .plot_utils.utils import *
@@ -46,7 +46,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         #---filter df according to FLAGS.filter
         if pflt:
             save_name += pflt.replace(' / ', '-').replace(' ', '_')
-            df = select_df(df, {fk:fvs for fk, *fvs in map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/'))}) # split ' ' except ', '
+            filt_dict = map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/')) # split ' ' except ', '
+            df = select_df(df, {fk:[*map(str2value, fvs)] for fk, *fvs in filt_dict}) 
         
         if pmlf:
             save_name = pmlf + '-' + save_name
@@ -59,6 +60,15 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             pcfg['best_ref_x_field']=base_config.num_epochs-1
         best_at_max = 'accuracy' in (pcfg['best_ref_ml_field'] if pmlf=='metric' else metric)
         
+        # Notify field handling statistics
+        specified_field = {k for k in best_over if len(set(df.index.get_level_values(k)))==1}
+        logging.info('\n\n' + box_str("Field handling statistics",
+                                      f'''- Key field (has multiple values): {[x_field, pmlf]}
+                                          - Specified field: {[*specified_field, 'metric']}
+                                          - Averaged field: {['seed']}
+                                          - Optimized field: {list(best_over-specified_field)}''',
+                                      box_width=150-9, indent=9, skip=0)
+                     )
         ############################# Prepare dataframe #############################
         
         best_of = {}
@@ -83,7 +93,11 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             colors = iter(sns.color_palette()*10)
         elif pcfg['colors']=='cont':
             colors = iter([c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:]) if i%2])
-    
+        
+        # select specified metric if multi_line_field isn't metric
+        if pmlf!='metric':
+            best_df = select_df(best_df, {'metric': metric}, x_field)
+            
         for mlv in mlines:
             p_df = select_df(best_df, {pmlf: mlv}, x_field)
             legend = str(mlv).replace('_', ' ')
@@ -127,7 +141,7 @@ def run(argv):
         
     ax_styler(ax, **plot_config['ax_style'])
     save_figure(fig, save_dir, save_name)
-    logging.info(f'save plot as {save_dir}/{save_name}.pdf')
+    logging.info(f'save plot as "{save_dir}/{save_name}.pdf"')
     
 def main():
     flags.DEFINE_string('exp_folder', '', "Experiment folder path.")
