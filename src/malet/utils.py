@@ -52,5 +52,3 @@ def str2value(value_str):
     elif (m:=re.findall('-?\d+', value_str)) and len(m)==1:
       return int(value_str)
     return value_str
-
-print(str2value)

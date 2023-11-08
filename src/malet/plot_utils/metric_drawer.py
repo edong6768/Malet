@@ -11,7 +11,9 @@ def select_df(df, filt_dict, *exclude_fields, drop=False):
     
     nest = lambda vs: vs if isinstance(vs, list) else [vs]
     for k in filt_keys:
-        df = df.loc[df.index.get_level_values(k).isin(nest(filt_dict[k]))]
+        values = nest(filt_dict[k])
+        assert not (v:=set(values)-(vs:=set(df.index.get_level_values(k)))), f"Values {v} are not in field '{k}': {sorted(vs)}"
+        df = df.loc[df.index.get_level_values(k).isin(values)]
     
     if drop:
         df = df.reset_index([*filt_keys], drop=True)

@@ -33,7 +33,7 @@ def merge_dict(base: dict, other: dict):
                 if not isinstance(d[k][-1], dict):
                     d[k] += [dict]
             base[k] = base[k][:-1] + other[k][:-1] \
-                      + merge_dict(base[k][-1], other[k][-1])
+                      + [merge_dict(base[k][-1], other[k][-1])]
         elif isinstance(base[k], dict):
             base[k] = merge_dict(base[k], other[k])
     for k in (set(other) - set(base)):

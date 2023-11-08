@@ -416,6 +416,7 @@ You can specify a set of arguments for `malet.plot` in the yaml file and give it
 ```bash
 malet-plot \
 -exp_folder ../experiments/{exp_folder} \
+-plot_config {plot_config_path} \
 -mode sam_rho
 ```
 
