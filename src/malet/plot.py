@@ -43,41 +43,59 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         df = pai_history.explode_and_melt_metric(epoch=None if x_field=='epoch' else -1)
         base_config = ConfigDict(pai_history.static_configs)
         
+        
         #---filter df according to FLAGS.filter
         if pflt:
             save_name += pflt.replace(' / ', '-').replace(' ', '_')
             filt_dict = map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/')) # split ' ' except ', '
             df = select_df(df, {fk:[*map(str2value, fvs)] for fk, *fvs in filt_dict}) 
         
+        #---set mlines according to FLAGS.multi_line_field
         if pmlf:
-            save_name = pmlf + '-' + save_name
+            save_name = pmlf + (f'-{save_name}' if save_name else '')
             mlines = sorted(set(df.index.get_level_values(pmlf)), key=str2value)
         else:
             pmlf, mlines = 'metric', [metric]
         
+        #---enter other configs in save name
+        if any([pcfg[f'best_ref_{k}'] for k in ['x_field', 'metric_field', 'ml_field']]):
+            save_name +=  f"-({pcfg['best_ref_x_field']}, {pcfg['best_ref_metric_field']}, {pcfg['best_ref_ml_field']})"
+        
+        save_name += "-max" if pcfg['best_at_max'] else "-min"
+        
         best_over = set(df.index.names) - {x_field, 'metric', 'seed', pmlf}
+        best_at_max = pcfg['best_at_max']
         if x_field=='epoch':
             pcfg['best_ref_x_field']=base_config.num_epochs-1
-        best_at_max = 'accuracy' in (pcfg['best_ref_ml_field'] if pmlf=='metric' else metric)
         
-        # Notify field handling statistics
+        # Notify selected plot configs and field handling statistics
         specified_field = {k for k in best_over if len(set(df.index.get_level_values(k)))==1}
-        logging.info('\n\n' + box_str("Field handling statistics",
-                                      f'''- Key field (has multiple values): {[x_field, pmlf]}
-                                          - Specified field: {[*specified_field, 'metric']}
-                                          - Averaged field: {['seed']}
-                                          - Optimized field: {list(best_over-specified_field)}''',
+        logging.info('\n\n' + box_str('Plot configuration', 
+                                      '\n'.join([f'- {k}: {pcfg[k]}' 
+                                                 for k in ('mode', 'multi_line_field', 
+                                                           'filter', 'best_at_max', 
+                                                           'best_ref_x_field', 'best_ref_metric_field', 
+                                                           'best_ref_ml_field') if pcfg[k]]),
+                                      box_width=150-9, indent=9, skip=0) +
+                     '\n\n' + box_str("Field handling statistics",
+                                      f'''- Key field (has multiple values): {[x_field, pmlf]} (2)
+                                          - Specified field: {(spf:=[*specified_field, 'metric'])} ({len(spf)})
+                                          - Averaged field: {['seed']} (1)
+                                          - Optimized field: {(opf:=list(best_over-specified_field))} ({len(opf)})''',
                                       box_width=150-9, indent=9, skip=0)
                      )
         ############################# Prepare dataframe #############################
         
         best_of = {}
+        if pcfg['best_ref_x_field']: # same hyperparameter over all points in line
+            best_of[x_field] = pcfg['best_ref_x_field']
+
+        if pcfg['best_ref_metric_field']: # Optimize in terms of reference metric, and apply those hyperparameters to original
+            best_of['metric'] = pcfg['best_ref_metric_field']
+        
         if pcfg['best_ref_ml_field']: # same hyperparameter over all line in multi_line_field
             best_of[pmlf] = pcfg['best_ref_ml_field']
             
-        if pcfg['best_ref_x_field']: # same hyperparameter over all points in line
-            best_of[x_field] = pcfg['best_ref_x_field']
-        
         # change field name and avg over seed and get best result over best_over
         best_df = avgbest_df(df, 'metric_value',
                              avg_over='seed', 
@@ -106,6 +124,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             
             # remove unnessacery fields
             p_df = p_df.reset_index([*(set(p_df.index.names) - {x_field})], drop=True)
+            p_df = p_df.sort_index(level=x_field, key=lambda s: [*map(str2value, s)])
             
             pcfg['line_style']['color'] = next(colors)
             ax = ax_draw(ax, p_df, legend,
@@ -115,7 +134,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         y_label = metric.replace('_', ' ').capitalize()
         
-        return fig, ax, y_label, save_name
+        return fig, ax, y_label, save_name.strip('-')
         
 def run(argv):
     if len(argv)>2:
@@ -141,7 +160,10 @@ def run(argv):
         
     ax_styler(ax, **plot_config['ax_style'])
     save_figure(fig, save_dir, save_name)
-    logging.info(f'save plot as "{save_dir}/{save_name}.pdf"')
+    logging.info('\n\n' + \
+                  box_str('Plot complete', 
+                         f'save plot at: {save_dir}/{save_name}.pdf',
+                         box_width=150-9, indent=9, skip=0))
     
 def main():
     flags.DEFINE_string('exp_folder', '', "Experiment folder path.")
@@ -150,7 +172,9 @@ def main():
     flags.DEFINE_string('filter', '', "filter values.")
     flags.DEFINE_string('multi_line_field', '', "Field to plot multiple lines over.")
     flags.DEFINE_string('best_ref_x_field', '', "Reference x_field-value to evaluate optimal hyperparameters.")
+    flags.DEFINE_string('best_ref_metric_field', '', "Reference metric_field-value to evaluate optimal hyperparameters.")
     flags.DEFINE_string('best_ref_ml_field', '', "Reference multi_line_field-value to evaluate optimal hyperparameters.")
+    flags.DEFINE_bool('best_at_max', False, 'Whether the bese metric value is the maximum value.')
     
     flags.DEFINE_string('plot_config', '', "Yaml file path for various plot setups.")
     flags.DEFINE_string('colors', '', "color scheme ('', 'cont').")

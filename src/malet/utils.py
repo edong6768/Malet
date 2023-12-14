@@ -45,10 +45,13 @@ def str2value(value_str):
     # list
     if '[' in value_str:
       return [str2value(v) for v in value_str[1:-1].split(',')]
+    # tuple
+    if '(' in value_str:
+      return tuple(str2value(v) for v in value_str[1:-1].split(','))
     # float
-    elif (m:=re.findall('-?\d*\.\d*', value_str)) and len(m)==1:
+    elif (m:=re.findall('-?\d*\.\d*', value_str)) and len(m)==1 and m[0]==value_str:
       return float(value_str)
     # int
-    elif (m:=re.findall('-?\d+', value_str)) and len(m)==1:
-      return int(value_str)
+    elif (m:=re.findall('-?\d+', value_str)) and len(m)==1 and m[0]==value_str:
+      return int(value_str) 
     return value_str

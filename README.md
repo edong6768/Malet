@@ -651,10 +651,11 @@ The `ExperimentLog.get_log_checkpoint` method retrieves the `metric_dict` based 
 |status|Description|Behavior when resumed|
 |:----:|-----------|--------|
 | `R`  | Currently running | Get skipped |
-| `F`  | Failed while running | Rerun and `metric_dict` is retrieved |
 | `C`  | Completed | Get skipped |
+| `F`  | Failed while running | Rerun and `metric_dict` is retrieved |
 
-Before resuming the experiment after abrupt halt, you need to **manually find the row in the `log.tsv` file corresponding to the halted job and change the `status` from `R` (running) to `F` (falied)**.
+Note that with some external halt (e.g. computer shut down, slurm job cancellation), malet won't be able to log the status as `F` (failed). 
+In these cases, you need to **manually find the row in the `log.tsv` file corresponding to the halted job and change the `status` from `R` (running) to `F` (falied)**.
 
 #### Running experiment
 
