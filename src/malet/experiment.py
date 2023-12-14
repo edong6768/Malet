@@ -221,7 +221,6 @@ class ExperimentLog:
         list_filt = lambda f: isinstance(v:=df[f].iloc[0], str) and '[' in v
         list_fields = [*filter(list_filt, list(df))]
         df[list_fields] = df[list_fields].applymap(str2value)
-        # df[list_fields] = df[list_fields].applymap(lambda s: [*map(float, s[1:-1].split(','))] if isinstance(s, str) else s)
       
     return {'static_configs': static_configs,
             'grid_fields': idx[1:],
@@ -278,25 +277,20 @@ class ExperimentLog:
   
   # Add results.
   # -----------------------------------------------------------------------------
-  @update_tsv
-  def add_configs_only(self, configs):
-    cur_gridval = tuple(configs[k] for k in self.grid_fields)
-    self.df.loc[cur_gridval] = [float('nan') for _ in self.field_order]
-
-
+  
   @partial(update_tsv, mode='r')
-  def add_result(self, metrics, configs, **infos):
+  def add_result(self, configs, metrics=dict(), **infos):
     '''Add experiment run result to dataframe'''
-    df_row = {**infos, **metrics}
-    df_row = [df_row[k] for k in self.field_order]
+    cur_gridval = tuple(configs[k] for k in self.grid_fields)
     
-    result_gridval = tuple(configs[k] for k in self.grid_fields)
-    
+    row_dict = {**infos, **metrics}
+    df_row = [row_dict.get(k) for k in self.field_order]
+      
     # Write over metric results if there is a config saved
     if configs in self:
-      self.df = self.df.drop(result_gridval)
+      self.df = self.df.drop(cur_gridval)
     
-    self.df.loc[result_gridval] = df_row
+    self.df.loc[cur_gridval] = df_row
 
 
   # Merge ExperimentLogs.
@@ -391,7 +385,6 @@ class ExperimentLog:
     metric_dict = {k:(v.iloc[0] if not (v:=cfg_matched_df[k]).empty else None) for k in self.metric_fields}
     info_dict = {k:(v.iloc[0] if not (v:=cfg_matched_df[k]).empty else None) for k in self.info_fields}
     return metric_dict, info_dict
-
 
   def is_same_exp(self, other):
     '''Check if both logs have same config fields.'''
@@ -497,6 +490,9 @@ class Experiment:
     
     
   def __process_split(self):
+    
+    assert self.exp_bs.isdigit() or (self.exp_bs in self.configs.grid_fields), \
+        f'Enter valid splits (int | Literal{self.configs.grid_fields}).'
     # if total exp split is given as integer : uniformly split
     if self.exp_bs.isdigit():
       self.exp_bs, self.exp_bi = map(int, [self.exp_bs, self.exp_bi])
@@ -506,18 +502,17 @@ class Experiment:
         self.configs.filter_iter(lambda i, _: i%self.exp_bs==self.exp_bi)
         
     # else split across certain study field
-    else:
-      assert self.exp_bs in self.configs.grid_fields, \
-          f'Split field {self.exp_bs} is not in study fields {self.configs.grid_fields}.'
+    elif self.exp_bs in self.configs.grid_fields:
       
       self.exp_bi = [*map(str2value, self.exp_bi.split())]
       self.configs.filter_iter(lambda _, d: d[self.exp_bs] in self.exp_bi)
       
       
+      
   def __get_log(self, logs_file, metric_fields=None, auto_update_tsv=False):
     # Configure experiment log
     if os.path.exists(logs_file): # Check if there already is a file
-      log = ExperimentLog.from_tsv(logs_file, self.info_field, auto_update_tsv=auto_update_tsv) # resumes automatically
+      log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv) # resumes automatically
     else: # Create new log
       log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file, self.info_field, 
                                           metric_fields=metric_fields, auto_update_tsv=auto_update_tsv)
@@ -543,7 +538,6 @@ class Experiment:
                         datetime=str(datetime.now()), status=self.__RUNNING)
     self.log.to_tsv()
     
-    
   def run(self):
     
     # current experiment count
@@ -557,24 +551,31 @@ class Experiment:
 
       if config in self.log:
         metric_dict, info_dict = self.log.get_metric_and_info(config)
-        if info_dict['status'] != self.__FAILED:
+        if info_dict.get('status') != self.__FAILED:
           continue # skip already executed runs
       
-      if self.configs_save and config not in self.log:
-        self.log.add_configs_only(config)
+      # if config not in self.log or status==self.__FAILED
+      if self.configs_save:
+        self.log.add_result(config, status=self.__RUNNING)
+        self.log.to_tsv()
 
       logging.info('###################################')
       logging.info(f'   Experiment count : {i+1}/{len(self.configs)}')
       logging.info('###################################') 
 
-      if self.checkpoint:
-        metric_dict = self.exp_func(config, self)
-      else:
-        metric_dict = self.exp_func(config)
-        
 
+      try:
+        if self.checkpoint:
+          metric_dict = self.exp_func(config, self)
+        else:
+          metric_dict = self.exp_func(config)
+      except:
+        self.log.add_result(config, status=self.__FAILED)
+        self.log.to_tsv()
+        raise
+      
       # Open log file and add result
-      self.log.add_result(metric_dict, configs=config, 
+      self.log.add_result(config, metrics=metric_dict,
                           datetime=str(datetime.now()), status=self.__COMPLETED)
       self.log.to_tsv()
       
