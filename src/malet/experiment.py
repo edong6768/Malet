@@ -14,7 +14,7 @@ import numpy as np
 from absl import logging
 from ml_collections.config_dict import ConfigDict
 
-from .utils import str2value
+from .utils import list2tuple, str2value
 
 Self = TypeVar("Self", bound="Experiment")
 ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, Self], dict]]
@@ -50,7 +50,7 @@ class ConfigIter:
       self.raw_config = yaml.safe_load(cnfg_str)
     
     self.name = os.path.split(exp_config_path)[0].split('/')[-1]
-    self.grid = self.raw_config.get('grid', None)
+    self.grid = self.raw_config.get('grid')
     self.static_configs = {k:self.raw_config[k] for k in set(self.raw_config)-{'grid_fields', 'grid'}}
   
     self.grid_iter = self.__get_iter()
@@ -179,15 +179,15 @@ class ExperimentLog:
                metric_fields=metric_fields, auto_update_tsv = auto_update_tsv)
 
   @classmethod
-  def from_tsv(cls, logs_file: str, auto_update_tsv: bool=True):
+  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=True):
     '''open tsv with yaml header'''
-    return cls(**cls.parse_tsv(logs_file), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+    return cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
   
   
   # tsv handlers.
   # -----------------------------------------------------------------------------
   @classmethod
-  def parse_tsv(cls, log_file: str):
+  def parse_tsv(cls, log_file: str, parse_str=True):
     '''parses tsv file into usable datas'''
     assert os.path.exists(log_file), f'File path "{log_file}" does not exists.'
 
@@ -220,7 +220,8 @@ class ExperimentLog:
       if not df.empty:
         list_filt = lambda f: isinstance(v:=df[f].iloc[0], str) and '[' in v
         list_fields = [*filter(list_filt, list(df))]
-        df[list_fields] = df[list_fields].applymap(str2value)
+        if parse_str:
+          df[list_fields] = df[list_fields].applymap(str2value)
       
     return {'static_configs': static_configs,
             'grid_fields': idx[1:],
@@ -228,16 +229,16 @@ class ExperimentLog:
             'df': df}
   
 
-  def load_tsv(self, logs_file):
+  def load_tsv(self, logs_file, parse_str=True):
     '''load tsv with yaml header'''
     if logs_file is not None:
       self.logs_file=logs_file
       
-    for k, v in self.parse_tsv(self.logs_file).items():
+    for k, v in self.parse_tsv(self.logs_file, parse_str=parse_str).items():
       self.__dict__[k] = v
   
 
-  def to_tsv(self, logs_file=None, only_final=False):
+  def to_tsv(self, logs_file=None):
     logs_file = self.logs_file if logs_file==None else logs_file
     
     logs_path, _ = os.path.split(logs_file)
@@ -281,7 +282,7 @@ class ExperimentLog:
   @partial(update_tsv, mode='r')
   def add_result(self, configs, metrics=dict(), **infos):
     '''Add experiment run result to dataframe'''
-    cur_gridval = tuple(configs[k] for k in self.grid_fields)
+    cur_gridval = list2tuple([configs[k] for k in self.grid_fields])
     
     row_dict = {**infos, **metrics}
     df_row = [row_dict.get(k) for k in self.field_order]
@@ -323,11 +324,12 @@ class ExperimentLog:
     new_to_othr_sf = [sf for sf in self.grid_fields if sf not in other.grid_fields] + diff_sttc
 
     # fill in new grid_fields in each df from static_configs and configs
+    # change list configs to tuple for hashablilty
     for sf in new_to_self_sf:
-      self.df[sf] = [self.static_configs.get(sf, np.nan)]*len(self)
+      self.df[sf] = [list2tuple(self.static_configs.get(sf, np.nan))]*len(self)
 
     for sf in new_to_othr_sf:
-      other.df[sf] = [other.static_configs.get(sf, np.nan)]*len(other)
+      other.df[sf] = [list2tuple(other.static_configs.get(sf, np.nan))]*len(other)
 
     self.static_configs = new_sttc
     self.grid_fields += new_to_self_sf
@@ -345,7 +347,7 @@ class ExperimentLog:
 
   @staticmethod
   def merge_tsv(*names, logs_path, same=True, only_final=False):
-    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv')) for n in names]
+    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv'), parse_str=False) for n in names]
     base.merge(*logs, same=same)
     base.to_tsv(os.path.join(logs_path, 'log_merged.tsv'), only_final)
 
@@ -362,7 +364,7 @@ class ExperimentLog:
 
   def __cfg_match_row(self, config):
     grid_filt = reduce(lambda l, r: l & r, 
-                       (self.df.index.get_level_values(k)==(str(config[k]) if type(config[k])==list else config[k]) 
+                       (self.df.index.get_level_values(k)==(str(config[k]) if isinstance(config[k], list) else config[k]) 
                         for k in self.grid_fields))
     return self.df[grid_filt]
   
@@ -412,7 +414,7 @@ class ExperimentLog:
         df['epoch'] = df[l].map(lambda _: epoch)
         
     for m in list_fields:
-        df[m] = df.apply(lambda df: df[m][df.epoch], axis=1) # list[epoch] for all fields
+      df[m] = df.apply(lambda df: df[m][df.epoch] if len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
     
     df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
     

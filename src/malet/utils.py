@@ -35,6 +35,14 @@ def box_str(title: str, content: str,
     result += line_b()
     result += line_b(l=2, a='^')
     return result
+  
+
+def list2tuple(l):
+  if isinstance(l, list):
+    return tuple(map(list2tuple, l))
+  if isinstance(l, dict):
+    return {k: list2tuple(v) for k, v in l.items()}
+  return l
     
     
 def str2value(value_str):
