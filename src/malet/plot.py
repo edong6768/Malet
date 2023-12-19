@@ -38,8 +38,10 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         mode, x_field, metric = pcfg['mode'].split('-') # ex) {sam}-{epoch}-{train_loss}
         pflt, pmlf = map(pcfg.get, ['filter', 'multi_line_field'])
             
-        # get dataframe
+        # get dataframe, drop unused metrics for efficient process
         pai_history = ExperimentLog.from_tsv(tsv_file)
+        pai_history.df = pai_history.df.drop(list(set(pai_history.df)-{metric, pcfg['best_ref_metric_field']}), axis=1)
+        
         df = pai_history.explode_and_melt_metric(epoch=None if x_field=='epoch' else -1)
         base_config = ConfigDict(pai_history.static_configs)
         
@@ -66,7 +68,11 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         best_over = set(df.index.names) - {x_field, 'metric', 'seed', pmlf}
         best_at_max = pcfg['best_at_max']
         if x_field=='epoch':
-            pcfg['best_ref_x_field']=base_config.num_epochs-1
+            if 'num_epochs' in base_config:
+                pcfg['best_ref_x_field']=base_config.num_epochs-1
+            elif 'num_epochs' in df:
+                ...
+                pcfg['best_ref_x_field']=199
         
         # Notify selected plot configs and field handling statistics
         specified_field = {k for k in best_over if len(set(df.index.get_level_values(k)))==1}
@@ -120,7 +126,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             p_df = select_df(best_df, {pmlf: mlv}, x_field)
             legend = str(mlv).replace('_', ' ')
             
-            p_df, legend = preprcs_df(p_df, legend) 
+            p_df, legend, mlv = preprcs_df(p_df, legend, mlv) 
             
             # remove unnessacery fields
             p_df = p_df.reset_index([*(set(p_df.index.names) - {x_field})], drop=True)

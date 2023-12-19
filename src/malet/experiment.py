@@ -292,7 +292,18 @@ class ExperimentLog:
       self.df = self.df.drop(cur_gridval)
     
     self.df.loc[cur_gridval] = df_row
-
+    
+  
+  def add_computed_result(self, new_field_name, fn, *fn_arg_fields):
+    '''Add new column field computed from existing fields in self.df'''
+    def mapper(*args):
+      if all(isinstance(i, (int, float)) for i in args):
+        return fn(*args)
+      elif all(isinstance(i, list) for i in args):
+        return [*map(fn, *args)]
+      return None
+    
+    self.df[new_field_name] = self.df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
 
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
@@ -346,17 +357,17 @@ class ExperimentLog:
       self.__merge_one(other, same=same)
 
   @staticmethod
-  def merge_tsv(*names, logs_path, same=True, only_final=False):
+  def merge_tsv(*names, logs_path, same=True):
     base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv'), parse_str=False) for n in names]
     base.merge(*logs, same=same)
-    base.to_tsv(os.path.join(logs_path, 'log_merged.tsv'), only_final)
+    base.to_tsv(os.path.join(logs_path, 'log_merged.tsv'))
 
   @staticmethod
-  def merge_folder(logs_path, only_final=False):
+  def merge_folder(logs_path):
     # change later if we start saving tsvs to other directories
     os.chdir(logs_path)
     logs = [f[:-4] for f in glob.glob("*.tsv")]
-    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, only_final=only_final)
+    ExperimentLog.merge_tsv(*logs, logs_path=logs_path)
     
   
   # Utilities.
@@ -414,13 +425,18 @@ class ExperimentLog:
         df['epoch'] = df[l].map(lambda _: epoch)
         
     for m in list_fields:
-      df[m] = df.apply(lambda df: df[m][df.epoch] if len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
+      df[m] = df.apply(lambda df: df[m][df.epoch] if df[m] is not np.nan and len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
     
     df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
     
     # melt
     df = df.melt(value_vars=list(df), var_name='metric', value_name='metric_value', ignore_index=False)
     df = df.reset_index().set_index([*df.index.names, 'metric'])
+    
+    # delete string and NaN valued rows
+    df = df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]\
+              .dropna()\
+              .astype('float')
     
     return df
 

@@ -195,6 +195,13 @@ This can be done using the following arguments.
     -multi_line_field {field_name}
     ```
 
+4. **`-best_at_max`** (Default: False): Specify whether chosen metric is best when largest (e.g. accuracy).
+
+    ```bash
+    -best_at_max
+    -nobest_at_max
+    ```
+
 #### Styling arguments
 
 1. **`-colors`**: There are two color mode `''`, `'cont'`, where one uses rainbow like colors and the other uses more continuous colors.
@@ -358,6 +365,12 @@ This argument lets you specify on which value of `x_field` to choose the best hy
 
     ```bash
     -best_ref_ml_field {ml_field_value}
+    ```
+
+- `-best_ref_metric_field`: To plot one metric with the hyperparameter set chosen based on another, pass the name of the metric of reference in `metric_field_value`.
+
+    ```bash
+    -best_ref_metric_field {metric_field_value}
     ```
 
 #### 2. Advanced yaml plot config

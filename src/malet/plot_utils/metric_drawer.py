@@ -43,7 +43,7 @@ def avgbest_df(df, metric_field,
     # avg over avg_over
     if avg_over is not None:
         df_fields -= {avg_over}
-        avg_over_group = df.groupby([*df_fields])
+        avg_over_group = df.groupby([*df_fields], dropna=True)
         df = avg_over_group.mean(numeric_only=True)
         df[metric_field+'_std'] = avg_over_group.sem(numeric_only=True)[metric_field]  # add std column
     
