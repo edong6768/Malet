@@ -10,6 +10,7 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 from absl import logging
 from ml_collections.config_dict import ConfigDict
@@ -179,7 +180,7 @@ class ExperimentLog:
                metric_fields=metric_fields, auto_update_tsv = auto_update_tsv)
 
   @classmethod
-  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=True):
+  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=False):
     '''open tsv with yaml header'''
     return cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
   
@@ -269,7 +270,8 @@ class ExperimentLog:
   def update_tsv(func, mode='rw'):
     '''Decorator for read/write tsv before/after given function call'''
     def wrapped(self, *args, **kwargs):
-      if self.auto_update_tsv and 'r' in mode: self.load_tsv(self.logs_file)
+      if self.auto_update_tsv and 'r' in mode: 
+        self.load_tsv(self.logs_file)
       ret = func(self, *args, **kwargs)
       if self.auto_update_tsv and 'w' in mode: self.to_tsv()
       return ret
@@ -297,13 +299,20 @@ class ExperimentLog:
   def add_computed_result(self, new_field_name, fn, *fn_arg_fields):
     '''Add new column field computed from existing fields in self.df'''
     def mapper(*args):
-      if all(isinstance(i, (int, float)) for i in args):
+      if all(isinstance(i, (int, float, str)) for i in args):
         return fn(*args)
       elif all(isinstance(i, list) for i in args):
         return [*map(fn, *args)]
       return None
-    
     self.df[new_field_name] = self.df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
+    
+    
+  def add_derived_index(self, new_index_name, fn, *fn_arg_fields):
+    '''Add new index field computed from existing fields in self.df'''
+    self.df = self.df.reset_index(self.grid_fields)
+    self.add_computed_result(new_index_name, fn, *fn_arg_fields)
+    self.grid_fields.append(new_index_name)
+    self.df = self.df.set_index(self.grid_fields)
 
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
@@ -347,8 +356,8 @@ class ExperimentLog:
     self.field_order = self.info_fields + self.metric_fields
     
     self.df, other.df = (obj.df.reset_index() for obj in (self, other))
-    self.df = self.df.merge(other.df, how='outer')[self.grid_fields+self.field_order] \
-                     .set_index(self.grid_fields)
+    self.df = pd.concat([self.df, other.df])[self.grid_fields+self.field_order] \
+                .set_index(self.grid_fields)
     return self
 
   def merge(self, *others, same=True):
@@ -392,6 +401,7 @@ class ExperimentLog:
 
 
   def get_metric_and_info(self, config):
+    '''Search matching log with given config dict and return metric_dict, info_dict'''
     assert config in self, 'config should be in self when using get_metric_dict.'
     
     cfg_matched_df = self.__cfg_match_row(config)
@@ -409,25 +419,27 @@ class ExperimentLog:
     df = self.df if df is None else df
     
     # explode
-    list_fields = l, *_ = [*filter(lambda f: isinstance(df[f].iloc[0], list), list(df))]
+    list_fields = [*filter(lambda f: isinstance(df[f].iloc[0], list), list(df))]
     nuisance_fields = [*filter(lambda f: not isinstance(df[f].iloc[0], (int, float, list)), list(df))]
     df = df.drop(nuisance_fields, axis=1)
     
-    # Create epoch field
-    df['total_epochs'] = df[l].map(len)
-    
-    if epoch is None:
-        df['epoch'] = df[l].map(lambda x: range(len(x)))
-        df = df.explode('epoch')  # explode metric list so each epoch gets its own row
-    else:
-        if epoch<0:
-            epoch += list(df['total_epochs'])[0]
-        df['epoch'] = df[l].map(lambda _: epoch)
-        
-    for m in list_fields:
-      df[m] = df.apply(lambda df: df[m][df.epoch] if df[m] is not np.nan and len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
-    
-    df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
+    if list_fields:
+      l, *_ = list_fields
+      # Create epoch field
+      df['total_epochs'] = df[l].map(len)
+      
+      if epoch is None:
+          df['epoch'] = df[l].map(lambda x: range(len(x)))
+          df = df.explode('epoch')  # explode metric list so each epoch gets its own row
+      else:
+          if epoch<0:
+              epoch += list(df['total_epochs'])[0]
+          df['epoch'] = df[l].map(lambda _: epoch)
+          
+      for m in list_fields:
+        df[m] = df.apply(lambda df: df[m][df.epoch] if df[m] is not np.nan and len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
+      
+      df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
     
     # melt
     df = df.melt(value_vars=list(df), var_name='metric', value_name='metric_value', ignore_index=False)
@@ -598,3 +610,35 @@ class Experiment:
       self.log.to_tsv()
       
       logging.info("Saved experiment data to log")
+      
+      
+  @staticmethod
+  def resplit_logs(logs_path: str, config_path: str, target_split: int, target_path: str):
+    """Resplit splitted logs into ``target_split`` number of splits."""
+    
+    # merge original log_splits
+    os.chdir(logs_path)
+    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, fn), parse_str=False) for fn in glob.glob("*.tsv")]
+    base.merge(*logs)
+    
+    # get configs
+    configs = ConfigIter(config_path)
+    
+    # replit merged logs based on target_split
+    for n in range(target_split):
+      # empty log
+      lgs = ExperimentLog.from_exp_config(configs.__dict__, 
+                                          os.path.join(target_path, f'split_{n}.tsv',),
+                                          base.info_fields,
+                                          base.metric_fields)
+      
+      # resplitting nth split
+      cfgs_temp = copy.deepcopy(configs)
+      cfgs_temp.filter_iter(lambda i, _: i%target_split==n)
+      for cfg in tqdm(cfgs_temp, desc=f'split: {n}/{target_split}'):
+        if cfg in base:
+          metric_dict, info_dict = base.get_metric_and_info(cfg)
+          lgs.add_result(cfg, metric_dict, **info_dict)
+        
+      lgs.to_tsv()
+
