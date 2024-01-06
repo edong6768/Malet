@@ -145,7 +145,7 @@ df = log.df
 
 Experiment logs also enables resuming to the most recently run config when a job is suddenly killed.
 Note that this only enable you to resume from the begining of the training.
-For resuming from intermediate log checkpoints, check out [Log checkpointing](#log-checkpointing).
+For resuming from intermediate log checkpoints, check out [Saving logs in intermediate epochs](#saving-logs-in-intermediate-epochs).
 
 ### 3. Plot making
 
@@ -168,10 +168,10 @@ This can be done using the following arguments.
 
 #### Data related arguments
 
-1. **`-mode`**: Mode consists of mode of the plot (currently only has 'curve'), the field for x-axis, and metric, which is metric to use for y-axis.
+1. **`-mode`**: Mode consists of mode of the plot (currently only has 'curve' and 'bar'), the field for x-axis, and the metric to use for y-axis.
 
     ```bash
-    -mode curve-{x_field}-{metric}
+    -mode {plot_mode}-{x_field}-{metric}
     ```
 
     Any other field except `x_field` and `seed` (always averaged over) is automatically chosen value with best metric.
@@ -189,10 +189,10 @@ This can be done using the following arguments.
 
     are automatically generated.
 
-3. **`-multi_line_field`**: Specify the field to plot multiple lines over
+3. **`-multi_line_field`**: Specify the fields to plot multiple lines over.
 
     ```bash
-    -multi_line_field {field_name}
+    -multi_line_field '{field1} {field2} ...'
     ```
 
 4. **`-best_at_max`** (Default: False): Specify whether chosen metric is best when largest (e.g. accuracy).
@@ -210,13 +210,19 @@ This can be done using the following arguments.
     -colors 'cont'
     ```
 
-2. **`-annotate`**: Add annotation of best hyperparameters above the graph with `-annotate`.
+2. **`-annotate`**: Option to add annotation based on field specified in `annotate_fields`.
 
     ```bash
     -annotate
     ```
 
-3. **`-plot_config`**: The path for a yaml file to configure all aspects the plot.
+3. **`-annotate_fields`**: Field to annotate.
+
+    ```bash
+    -annotate_fields '{field1} {field2} ...'
+    ```
+
+4. **`-plot_config`**: The path for a yaml file to configure all aspects the plot.
 
     ```bash
     -plot_config {plot_config_path}

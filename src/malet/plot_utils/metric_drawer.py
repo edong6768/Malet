@@ -4,6 +4,9 @@ import pandas as pd
 import matplotlib as mpl
 import numpy as np
 
+
+# Data Processors.
+# -----------------------------------------------------------------------------
 def select_df(df, filt_dict, *exclude_fields, drop=False):
     """Select df rows with matching from given filt_dict except ``exclude_fields``"""
     assert not (k:=set(filt_dict.keys()) - set(df.index.names)), f'filt_dict keys {k} is not in df.'
@@ -62,16 +65,24 @@ def avgbest_df(df, metric_field,
     return df
 
 
-def ax_draw(ax: mpl.axes.Axes,
-            df: pd.DataFrame,
-            label: str,
-            annotate = True,
-            std_plot: Literal['none','fill','bar'] = 'fill',
-            unif_xticks = False,
-            plot_config = {'linewidth':4, 'color':'orange', 'marker':'D', 'markersize':10, 'markevery':1},
+# Plotters.
+# -----------------------------------------------------------------------------
+
+def ax_draw_curve(ax: mpl.axes.Axes,
+                  df: pd.DataFrame,
+                  label: str,
+                  annotate = True,
+                  annotate_field = [],
+                  std_plot: Literal['none','fill','bar'] = 'fill',
+                  unif_xticks = False,
+                  color = 'orange', 
+                  linewidth = 4, 
+                  marker = 'D', 
+                  markersize = 10, 
+                  markevery = 20,
     ) -> mpl.axes.Axes:
     """
-    Draws y_field over arbitrary x_field setted as index of the dataframe.
+    Draws curve of y_field over arbitrary x_field setted as index of the dataframe.
     If there is column 'y_field_sdv' is in dataframe, draws in errorbar or fill_between depending on ``sdv_bar_plot``
     """
     assert std_plot in {'bar', 'fill', 'none'}, 'std_plot should be one of {"bar","fill","none"}'
@@ -81,33 +92,76 @@ def ax_draw(ax: mpl.axes.Axes,
     assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
     tick_values = x_values
     if unif_xticks:
-        ax.set_xticks(range(len(x_values)), x_values, fontsize=10, rotation=45)
         tick_values = np.arange(len(x_values))
+        ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
         
     if len(tick_values)==1:
-        ax.axhline(metric_values, linewidth=plot_config['linewidth'], color=plot_config['color'], label=label)
+        ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
         if f'{y_field}_std' in df:
             metric_std = float(df[f'{y_field}_std'])
-            ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=plot_config['color'])
+            ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
 
     else:
-        ax.plot(tick_values, metric_values, label=label, **plot_config)
+        ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
+                marker=marker, markersize=markersize, markevery=markevery)
         if f'{y_field}_std' in df:
             x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
             
             if std_plot=='bar':
-                ax.errorbar(tick_values, metric_values, yerr=metric_std, color=plot_config['color'], elinewidth=3)
+                ax.errorbar(tick_values, metric_values, yerr=metric_std, color=color, elinewidth=3)
             elif std_plot=='fill':
-                ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=plot_config['color'])
-            
+                ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
+                
         if annotate:
-            annot_field = set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'}
+            assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+            annotate_field = set(annotate_field) & a
             abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
                                       [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
-            abv_annot = [*map(abv, annot_field)]
+            abv_annot = [*map(abv, annotate_field)]
             for x,y,t in zip(x_values, metric_values, tick_values):
-                txt = '\n'.join(['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annot_field)])
+                txt = '\n'.join([f'{y:.5f}']+['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+    
+    ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
+
+    return ax
+
+def ax_draw_bar(ax: mpl.axes.Axes,
+                df: pd.DataFrame,
+                label: str,
+                annotate = True,
+                annotate_field = [],
+                std_plot = True,
+                unif_xticks = False,
+                color = 'orange',
+    ) -> mpl.axes.Axes:
+    """
+    Draws bar graph of y_field over arbitrary x_field setted as index of the dataframe.
+    If there is column 'y_field_sdv' is in dataframe, draws in errorbar or fill_between depending on ``sdv_bar_plot``
+    """
+    y_field = list(df)[0]
+    
+    x_values, metric_values = map(np.array, zip(*dict(df[y_field]).items()))
+    assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
+    
+    tick_values = np.arange(len(x_values))
+    ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
+
+    if std_plot and f'{y_field}_std' in df:
+        x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
+        ax.bar(tick_values, metric_values, yerr=metric_std, label=label, color=color)
+    else:
+        ax.bar(tick_values, metric_values, label=label, color=color)
+        
+    if annotate:
+        assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+        annotate_field = set(annotate_field) & a
+        abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
+                                [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
+        abv_annot = [*map(abv, annotate_field)]
+        for x,y,t in zip(x_values, metric_values, tick_values):
+            txt = '\n'.join([f'{y:.5f}']+['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
+            ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
 

@@ -1,6 +1,8 @@
 import os
 import re
 import yaml
+from functools import partial
+from itertools import product
 
 from absl import app, flags, logging
 from ml_collections import ConfigDict
@@ -36,11 +38,19 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         # parse mode string
         mode, x_field, metric = pcfg['mode'].split('-') # ex) {sam}-{epoch}-{train_loss}
+        
+        # choose plot mode
+        if mode=='curve':
+            ax_draw = ax_draw_curve
+        elif mode=='bar':
+            ax_draw = ax_draw_bar
+        
         pflt, pmlf = map(pcfg.get, ['filter', 'multi_line_field'])
             
         # get dataframe, drop unused metrics for efficient process
         pai_history = ExperimentLog.from_tsv(tsv_file)
-        pai_history.df = pai_history.df.drop(list(set(pai_history.df)-{metric, pcfg['best_ref_metric_field']}), axis=1)
+        if 'metric' not in pmlf and x_field!='metric':
+            pai_history.df = pai_history.df.drop(list(set(pai_history.df)-{metric, pcfg['best_ref_metric_field']}), axis=1)
         
         df = pai_history.explode_and_melt_metric(epoch=None if x_field=='epoch' else -1)
         base_config = ConfigDict(pai_history.static_configs)
@@ -54,10 +64,11 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         #---set mlines according to FLAGS.multi_line_field
         if pmlf:
-            save_name = pmlf + (f'-{save_name}' if save_name else '')
-            mlines = sorted(set(df.index.get_level_values(pmlf)), key=str2value)
+            save_name = '-'.join([*pmlf, save_name])
+            mlines = [sorted(set(df.index.get_level_values(f)), key=str2value) for f in pmlf]
+            mlines = product(*mlines)
         else:
-            pmlf, mlines = 'metric', [metric]
+            pmlf, mlines = ['metric'], [[metric]]
         
         #---enter other configs in save name
         if any([pcfg[f'best_ref_{k}'] for k in ['x_field', 'metric_field', 'ml_field']]):
@@ -65,7 +76,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         save_name += "-max" if pcfg['best_at_max'] else "-min"
         
-        best_over = set(df.index.names) - {x_field, 'metric', 'seed', pmlf}
+        best_over = set(df.index.names) - {x_field, 'metric', 'seed', *pmlf}
         best_at_max = pcfg['best_at_max']
         if x_field=='epoch':
             if 'num_epochs' in base_config:
@@ -84,12 +95,13 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                                                            'best_ref_ml_field') if pcfg[k]]),
                                       box_width=150-9, indent=9, skip=0) +
                      '\n\n' + box_str("Field handling statistics",
-                                      f'''- Key field (has multiple values): {[x_field, pmlf]} (2)
+                                      f'''- Key field (has multiple values): {[x_field, *pmlf]} (2)
                                           - Specified field: {(spf:=[*specified_field, 'metric'])} ({len(spf)})
                                           - Averaged field: {['seed']} (1)
                                           - Optimized field: {(opf:=list(best_over-specified_field))} ({len(opf)})''',
                                       box_width=150-9, indent=9, skip=0)
                      )
+        
         ############################# Prepare dataframe #############################
         
         best_of = {}
@@ -100,7 +112,9 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             best_of['metric'] = pcfg['best_ref_metric_field']
         
         if pcfg['best_ref_ml_field']: # same hyperparameter over all line in multi_line_field
-            best_of[pmlf] = pcfg['best_ref_ml_field']
+            br_mlf = pcfg['best_ref_ml_field'].split(' ')
+            for f, brf in zip(pmlf, br_mlf):
+                best_of[f] = brf
             
         # change field name and avg over seed and get best result over best_over
         best_df = avgbest_df(df, 'metric_value',
@@ -109,6 +123,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                              best_of=best_of,
                              best_at_max=best_at_max)
         
+        logging.info('\n\n' + box_str('Table', str(best_df), box_width=150-9, indent=9, skip=0, strip=False))
+        
         ############################# Plot #############################
         
         # prepare plot
@@ -116,33 +132,36 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         if pcfg['colors']=='':
             colors = iter(sns.color_palette()*10)
         elif pcfg['colors']=='cont':
-            colors = iter([c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:]) if i%2])
+            colors = iter([c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:])])# if i%2])
         
         # select specified metric if multi_line_field isn't metric
-        if pmlf!='metric':
+        if 'metric' in pmlf:
             best_df = select_df(best_df, {'metric': metric}, x_field)
             
-        for mlv in mlines:
-            p_df = select_df(best_df, {pmlf: mlv}, x_field)
-            legend = str(mlv).replace('_', ' ')
+        for mlvs in mlines:
+            p_df = select_df(best_df, {f: v for f, v in zip(pmlf, mlvs)}, x_field)
+            legend = ','.join([(v if isinstance(v, str) else f'{f} {v}').replace('_', ' ') for f, v in zip(pmlf, mlvs)])
             
-            p_df, legend, mlv = preprcs_df(p_df, legend, mlv) 
+            p_df, legend, mlvs = preprcs_df(p_df, legend, mlvs)
             
             # remove unnessacery fields
-            p_df = p_df.reset_index([*(set(p_df.index.names) - {x_field})], drop=True)
-            p_df = p_df.sort_index(level=x_field, key=lambda s: [*map(str2value, s)])
+            p_df = p_df.reset_index([*(set(p_df.index.names) - {x_field})], drop=False)\
+                       .sort_index(level=x_field, key=lambda s: [*map(str2value, s)])
+            p_df = p_df[['metric_value', *(set(p_df)-{'metric_value'})]]
             
             pcfg['line_style']['color'] = next(colors)
             ax = ax_draw(ax, p_df, legend,
                          annotate=pcfg['annotate'],
+                         annotate_field=pcfg['annotate_field'],
                          std_plot=pcfg['std_plot'],
-                         plot_config=pcfg['line_style'])
+                         **pcfg['line_style'])
         
         y_label = metric.replace('_', ' ').capitalize()
         
         return fig, ax, y_label, save_name.strip('-')
-        
-def run(argv):
+    
+
+def run(argv, preprcs_df):
     if len(argv)>2:
         raise app.UsageError('Too many command-line arguments.')
     
@@ -158,25 +177,26 @@ def run(argv):
     _, tsv_file, fig_dir = Experiment.get_paths(plot_config['exp_folder'])
     save_dir = os.path.join(fig_dir, plot_config['mode'])
     
-    if 'curve' in plot_config['mode']:
-        fig, ax, y_label, save_name = draw_metric(tsv_file, plot_config)
+    if 'curve' in plot_config['mode'] or 'bar' in plot_config['mode']:
+        fig, ax, y_label, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
         ax.set_ylabel(y_label)
     else:
         assert False, f'Mode: {plot_config["mode"]} does not exist.'
-        
+    
     ax_styler(ax, **plot_config['ax_style'])
     save_figure(fig, save_dir, save_name)
     logging.info('\n\n' + \
                   box_str('Plot complete', 
                          f'save plot at: {save_dir}/{save_name}.pdf',
                          box_width=150-9, indent=9, skip=0))
+
     
-def main():
+def main(preprcs_df = lambda *x: x):
     flags.DEFINE_string('exp_folder', '', "Experiment folder path.")
     
     flags.DEFINE_string('mode', 'curve-epoch-val_loss', "Plot mode.")
     flags.DEFINE_string('filter', '', "filter values.")
-    flags.DEFINE_string('multi_line_field', '', "Field to plot multiple lines over.")
+    flags.DEFINE_spaceseplist('multi_line_field', '', "List of fields to plot multiple lines over.")
     flags.DEFINE_string('best_ref_x_field', '', "Reference x_field-value to evaluate optimal hyperparameters.")
     flags.DEFINE_string('best_ref_metric_field', '', "Reference metric_field-value to evaluate optimal hyperparameters.")
     flags.DEFINE_string('best_ref_ml_field', '', "Reference multi_line_field-value to evaluate optimal hyperparameters.")
@@ -185,8 +205,9 @@ def main():
     flags.DEFINE_string('plot_config', '', "Yaml file path for various plot setups.")
     flags.DEFINE_string('colors', '', "color scheme ('', 'cont').")
     flags.DEFINE_bool('annotate', True, 'Run multiple plot according to given config.')
+    flags.DEFINE_spaceseplist('annotate_field', '', 'List of fields to include in annotation.')
 
-    app.run(run)
+    app.run(partial(run, preprcs_df=preprcs_df))
     
     
 if __name__=='__main__':

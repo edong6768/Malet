@@ -58,7 +58,7 @@ default_style = {
         'linewidth': 4,
         'marker': 'D',
         'markersize': 10,
-        'markevery': 20,
+        'markevery': 1,
     }
 }
 
