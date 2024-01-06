@@ -48,7 +48,6 @@ def list2tuple(l):
 def str2value(value_str):
     """Casts string to corresponding field type"""
     if not isinstance(value_str, str): return value_str
-    
     value_str = value_str.strip() \
                          .replace('\\', '') \
                          .replace('\'', '') \
@@ -60,12 +59,12 @@ def str2value(value_str):
     # tuple
     if '(' in value_str:
       return tuple(str2value(v) for v in value_str[1:-1].split(','))
+    # sci. notation
+    elif match_unique('-?\d\.?\d*e[+-]\d+'):
+      return float(value_str) 
     # float
     elif match_unique('-?\d*\.\d*'):
       return float(value_str)
-    # sci. notation
-    elif match_unique('-?\d\.\d+e(\+|-)\d+'):
-      return float(value_str) 
     # int
     elif match_unique('-?\d+'):
       return int(value_str) 

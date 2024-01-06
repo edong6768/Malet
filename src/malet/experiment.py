@@ -419,14 +419,18 @@ class ExperimentLog:
     df = self.df if df is None else df
     
     # explode
-    list_fields = [*filter(lambda f: isinstance(df[f].iloc[0], list), list(df))]
+    list_fields = [*filter(lambda f: any([isinstance(i, list) for i in list(df[f])]), list(df))]
+    pure_list_fields = [*filter(lambda f: all([isinstance(i, list) for i in list(df[f])]), list(df))]
     nuisance_fields = [*filter(lambda f: not isinstance(df[f].iloc[0], (int, float, list)), list(df))]
     df = df.drop(nuisance_fields, axis=1)
     
     if list_fields:
-      l, *_ = list_fields
+      l, *_ = pure_list_fields
+      
       # Create epoch field
       df['total_epochs'] = df[l].map(len)
+      
+      df[list_fields] = df[list_fields].apply(lambda x: ([None]*df['total_epochs'] if x is None else x))
       
       if epoch is None:
           df['epoch'] = df[l].map(lambda x: range(len(x)))
@@ -447,8 +451,8 @@ class ExperimentLog:
     
     # delete string and NaN valued rows
     df = df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]\
-              .dropna()\
-              .astype('float')
+           .dropna()\
+           .astype('float')
     
     return df
 
