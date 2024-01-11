@@ -4,14 +4,19 @@ import yaml
 from functools import partial
 from itertools import product
 
-from absl import app, flags, logging
+from absl import app, flags
 from ml_collections import ConfigDict
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 from .experiment import Experiment, ExperimentLog
-from .utils import str2value, box_str
+from .utils import str2value, df2richtable
+
+from rich import print
+from rich.panel import Panel
+from rich.columns import Columns
+from rich.align import Align
 
 from .plot_utils.metric_drawer import *
 from .plot_utils.utils import *
@@ -69,6 +74,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             mlines = product(*mlines)
         else:
             pmlf, mlines = ['metric'], [[metric]]
+            pcfg['ax_style'].pop('legend', None)
         
         #---enter other configs in save name
         if any([pcfg[f'best_ref_{k}'] for k in ['x_field', 'metric_field', 'ml_field']]):
@@ -87,20 +93,23 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         # Notify selected plot configs and field handling statistics
         specified_field = {k for k in best_over if len(set(df.index.get_level_values(k)))==1}
-        logging.info('\n\n' + box_str('Plot configuration', 
-                                      '\n'.join([f'- {k}: {pcfg[k]}' 
-                                                 for k in ('mode', 'multi_line_field', 
-                                                           'filter', 'best_at_max', 
-                                                           'best_ref_x_field', 'best_ref_metric_field', 
-                                                           'best_ref_ml_field') if pcfg[k]]),
-                                      box_width=150-9, indent=9, skip=0) +
-                     '\n\n' + box_str("Field handling statistics",
-                                      f'''- Key field (has multiple values): {[x_field, *pmlf]} (2)
-                                          - Specified field: {(spf:=[*specified_field, 'metric'])} ({len(spf)})
-                                          - Averaged field: {['seed']} (1)
-                                          - Optimized field: {(opf:=list(best_over-specified_field))} ({len(opf)})''',
-                                      box_width=150-9, indent=9, skip=0)
-                     )
+        print('\n\n',
+            Align(
+                Columns(
+                    [Panel('\n'.join([f'- {k}: {pcfg[k]}' 
+                                            for k in ('mode', 'multi_line_field', 
+                                                        'filter', 'best_at_max', 
+                                                        'best_ref_x_field', 'best_ref_metric_field', 
+                                                        'best_ref_ml_field') if pcfg[k]]),
+                                    title='Plot configuration', padding=(1, 3)),
+                            Panel(f"- Key field (has multiple values): {[x_field, *pmlf]} (2)\n" + \
+                                    f"- Specified field: {(spf:=[*specified_field, 'metric'])} ({len(spf)})\n"+ \
+                                    f"- Averaged field: {['seed']} (1)\n" + \
+                                    f"- Optimized field: {(opf:=list(best_over-specified_field))} ({len(opf)})",
+                                    title='Field handling statistics', padding=(1, 3))]
+                        ), align='center'
+                ))
+
         
         ############################# Prepare dataframe #############################
         
@@ -123,7 +132,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                              best_of=best_of,
                              best_at_max=best_at_max)
         
-        logging.info('\n\n' + box_str('Table', str(best_df), box_width=150-9, indent=9, skip=0, strip=False))
+        print('\n', Align(df2richtable(best_df), align='center'))
         
         ############################# Plot #############################
         
@@ -139,7 +148,10 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             best_df = select_df(best_df, {'metric': metric}, x_field)
             
         for mlvs in mlines:
-            p_df = select_df(best_df, {f: v for f, v in zip(pmlf, mlvs)}, x_field)
+            try:
+                p_df = select_df(best_df, {f: v for f, v in zip(pmlf, mlvs)}, x_field)
+            except:
+                continue
             legend = ','.join([(v if isinstance(v, str) else f'{f} {v}').replace('_', ' ') for f, v in zip(pmlf, mlvs)])
             
             p_df, legend, mlvs = preprcs_df(p_df, legend, mlvs)
@@ -167,11 +179,19 @@ def run(argv, preprcs_df):
     
     # Preprocess plot_config
     flag_dict = FLAGS.flag_values_dict()
+    fig_size = flag_dict.pop('fig_size')
+    
     plot_config = {**default_style, **flag_dict}
     if FLAGS.plot_config!='':
         with open(FLAGS.plot_config) as f:
             plot_config = yaml.safe_load(f.read())
             plot_config = get_plot_config(plot_config, flag_dict)
+            
+    if fig_size:
+        if len(fig_size)==1:
+            fig_size = fig_size*2
+        fig_size = [*map(float, fig_size)]
+        plot_config['ax_style']['fig_size'] = fig_size
     
     # get paths
     _, tsv_file, fig_dir = Experiment.get_paths(plot_config['exp_folder'])
@@ -185,10 +205,9 @@ def run(argv, preprcs_df):
     
     ax_styler(ax, **plot_config['ax_style'])
     save_figure(fig, save_dir, save_name)
-    logging.info('\n\n' + \
-                  box_str('Plot complete', 
-                         f'save plot at: {save_dir}/{save_name}.pdf',
-                         box_width=150-9, indent=9, skip=0))
+    
+    print('\n', Align(Panel(f'save plot at: {fig_dir}/[bold blue_violet]{plot_config["mode"]}[/bold blue_violet]/[bold spring_green1]{save_name}[/bold spring_green1].pdf', 
+                      title='Plot complete', padding=(1, 3), expand=False), align='center'), '\n')
 
     
 def main(preprcs_df = lambda *x: x):
@@ -206,6 +225,7 @@ def main(preprcs_df = lambda *x: x):
     flags.DEFINE_string('colors', '', "color scheme ('', 'cont').")
     flags.DEFINE_bool('annotate', True, 'Run multiple plot according to given config.')
     flags.DEFINE_spaceseplist('annotate_field', '', 'List of fields to include in annotation.')
+    flags.DEFINE_spaceseplist('fig_size', '', 'Figure size.')
 
     app.run(partial(run, preprcs_df=preprcs_df))
     

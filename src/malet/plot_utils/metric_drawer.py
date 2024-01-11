@@ -35,12 +35,23 @@ def avgbest_df(df, metric_field,
                best_over=tuple(), 
                best_of=dict(), 
                best_at_max=True):
-    """
-    Average over ``avg_over`` and get best result over ``best_over``
+    """Average over ``avg_over`` and get best result over ``best_over``
     
+    Args:
+        df (pandas.DataFrame): Base dataframe to operate over. All hyperparameters should be set as `MultiIndex`.
+        metric_field (str): Column name of the metric. Used to evaluate best hyperparameter.
+        avg_over (str): `MultiIndex` level name to average over.
+        best_over (List[str]): List of `MultiIndex` level names to find value yielding best values of `metric_field`.
+        best_of (Dict[str, Any]): Dictionary of pair `{MultiIndex name}: {value in MultiIndex}` to find best hyperparameter of. The other values in `{MultiIndex name}` will follow the best hyperparamter found for these values.
+        best_at_max (bool): `True` when larger metric is better, and `False` otherwise.
+        
+    Returns: 
+        pandas.DataFrame: Processed DataFrame
+    """
+    '''
     - aggregate index : avg_over, best_over
     - key index : best_of, others
-    """
+    '''
     df_fields = set(df.index.names)
     
     # avg over avg_over
@@ -125,6 +136,7 @@ def ax_draw_curve(ax: mpl.axes.Axes,
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
 
     return ax
+
 
 def ax_draw_bar(ax: mpl.axes.Axes,
                 df: pd.DataFrame,

@@ -65,7 +65,7 @@ default_style = {
 def ax_styler(ax: Axes, **style_dict):
   if (n:='fig_size') in style_dict:
     dim = style_dict.pop(n)
-    if type(dim)==int:
+    if isinstance(dim, int):
       w = h = dim
     else:
       w, h = dim
