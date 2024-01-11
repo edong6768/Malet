@@ -1,6 +1,8 @@
 import os, shutil
 import re
 
+from rich.table import Table
+
 def create_dir(dir):
   if os.path.exists(dir):
     for f in os.listdir(dir):
@@ -35,6 +37,19 @@ def box_str(title: str, content: str,
     result += line_b()
     result += line_b(l=2, a='^')
     return result
+
+
+def multi_column_str(*columns):
+  col_lists = [s.split('\n') for s in columns]
+  
+  height = max([len(l) for l in col_lists])
+  col_lists = [l+(['']*(height-len(l))) for l in col_lists] # fill height
+  
+  widths = [max([*map(len, l)]) for l in col_lists]
+  col_lists = [[s.ljust(w, ' ') for s in l] for l, w in zip(col_lists, widths)] # fill width
+  
+  mc_str = '\n'.join(map(''.join, zip(*col_lists)))
+  return mc_str
   
 
 def list2tuple(l):

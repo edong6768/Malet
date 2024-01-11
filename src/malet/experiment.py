@@ -1,4 +1,4 @@
-import os, glob, io
+import os, glob, shutil, io
 import copy
 import yaml
 import re
@@ -295,8 +295,8 @@ class ExperimentLog:
     
     self.df.loc[cur_gridval] = df_row
     
-  
-  def add_computed_result(self, new_field_name, fn, *fn_arg_fields):
+  @staticmethod
+  def __add_column(df, new_field_name, fn, *fn_arg_fields):
     '''Add new column field computed from existing fields in self.df'''
     def mapper(*args):
       if all(isinstance(i, (int, float, str)) for i in args):
@@ -304,15 +304,19 @@ class ExperimentLog:
       elif all(isinstance(i, list) for i in args):
         return [*map(fn, *args)]
       return None
-    self.df[new_field_name] = self.df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
-    
+    df[new_field_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
+    return df
+
+  def add_computed_result(self, new_field_name, fn, *fn_arg_fields):
+    '''Add new column field computed from existing fields in self.df'''
+    self.df = self.__add_column(self.df, new_field_name, fn, *fn_arg_fields)
     
   def add_derived_index(self, new_index_name, fn, *fn_arg_fields):
     '''Add new index field computed from existing fields in self.df'''
-    self.df = self.df.reset_index(self.grid_fields)
-    self.add_computed_result(new_index_name, fn, *fn_arg_fields)
+    df = self.df.reset_index(self.grid_fields)
+    df = self.__add_column(df, new_index_name, fn, *fn_arg_fields)
     self.grid_fields.append(new_index_name)
-    self.df = self.df.set_index(self.grid_fields)
+    self.df = df.set_index(self.grid_fields)
 
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
@@ -366,17 +370,19 @@ class ExperimentLog:
       self.__merge_one(other, same=same)
 
   @staticmethod
-  def merge_tsv(*names, logs_path, same=True):
+  def merge_tsv(*names, logs_path, save_path=None, same=True):
+    if save_path is None:
+      save_path = os.path.join(logs_path, 'log_merged.tsv')
     base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv'), parse_str=False) for n in names]
     base.merge(*logs, same=same)
-    base.to_tsv(os.path.join(logs_path, 'log_merged.tsv'))
+    base.to_tsv(save_path)
 
   @staticmethod
-  def merge_folder(logs_path):
-    # change later if we start saving tsvs to other directories
+  def merge_folder(logs_path, save_path=None):
+    """change later if we start saving tsvs to other directories"""
     os.chdir(logs_path)
     logs = [f[:-4] for f in glob.glob("*.tsv")]
-    ExperimentLog.merge_tsv(*logs, logs_path=logs_path)
+    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, save_path=save_path)
     
   
   # Utilities.
@@ -517,8 +523,7 @@ class Experiment:
     self.__process_split()
 
     if isinstance(self.exp_bs, int) and self.exp_bs>1 or isinstance(self.exp_bs, str):
-      tsv_dir, _ = os.path.split(tsv_file)
-      tsv_file = os.path.join(tsv_dir, 'log_splits', f'split_{self.exp_bi}.tsv') # for saving seperate log for each split in plan slitting mode.
+      tsv_file = os.path.join(exp_folder_path, 'log_splits', f'split_{self.exp_bi}.tsv') # for saving seperate log for each split in plan slitting mode.
     
     self.log = self.__get_log(tsv_file, exp_metrics, auto_update_tsv)
     
@@ -617,32 +622,49 @@ class Experiment:
       
       
   @staticmethod
-  def resplit_logs(logs_path: str, config_path: str, target_split: int, target_path: str):
+  def resplit_logs(exp_folder_path: str, target_split: int=1, save_backup: bool=True):
     """Resplit splitted logs into ``target_split`` number of splits."""
+    assert target_split > 0, 'Target split should be larger than 0'
+    
+    cfg_file, logs_file, _ = Experiment.get_paths(exp_folder_path)
+    logs_folder = os.path.join(exp_folder_path, 'log_splits')
     
     # merge original log_splits
-    os.chdir(logs_path)
-    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, fn), parse_str=False) for fn in glob.glob("*.tsv")]
-    base.merge(*logs)
+    if os.path.exists(logs_folder): # if log is splitted
+      os.chdir(logs_folder)
+      base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_folder, sp_n), parse_str=False) for sp_n in glob.glob("*.tsv")]
+      base.merge(*logs)
+      shutil.rmtree(logs_folder)
+    elif os.path.exists(logs_file): # if only single log file exists 
+      base = ExperimentLog.from_tsv(os.path.join(logs_file), parse_str=False)
+      shutil.rmtree(logs_file)
     
-    # get configs
-    configs = ConfigIter(config_path)
+    # save backup
+    if save_backup:
+      base.to_tsv(os.path.join(exp_folder_path, 'logs_backup.tsv'))
     
-    # replit merged logs based on target_split
-    for n in range(target_split):
-      # empty log
-      lgs = ExperimentLog.from_exp_config(configs.__dict__, 
-                                          os.path.join(target_path, f'split_{n}.tsv',),
-                                          base.info_fields,
-                                          base.metric_fields)
+    # resplit merged logs based on target_split
+    if target_split==1:
+      base.to_tsv(logs_file)
+    
+    elif target_split>1:
+      # get configs
+      configs = ConfigIter(cfg_file)
       
-      # resplitting nth split
-      cfgs_temp = copy.deepcopy(configs)
-      cfgs_temp.filter_iter(lambda i, _: i%target_split==n)
-      for cfg in tqdm(cfgs_temp, desc=f'split: {n}/{target_split}'):
-        if cfg in base:
-          metric_dict, info_dict = base.get_metric_and_info(cfg)
-          lgs.add_result(cfg, metric_dict, **info_dict)
+      for n in range(target_split):
+        # empty log
+        lgs = ExperimentLog.from_exp_config(configs.__dict__, 
+                                            os.path.join(logs_folder, f'split_{n}.tsv',),
+                                            base.info_fields,
+                                            base.metric_fields)
         
-      lgs.to_tsv()
+        # resplitting nth split
+        cfgs_temp = copy.deepcopy(configs)
+        cfgs_temp.filter_iter(lambda i, _: i%target_split==n)
+        for cfg in tqdm(cfgs_temp, desc=f'split: {n}/{target_split}'):
+          if cfg in base:
+            metric_dict, info_dict = base.get_metric_and_info(cfg)
+            lgs.add_result(cfg, metric_dict, **info_dict)
+          
+        lgs.to_tsv()
 
