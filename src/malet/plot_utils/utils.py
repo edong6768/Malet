@@ -27,13 +27,12 @@ def save_figure(fig, save_dir, save_name, png=False):
         fig.savefig(os.path.join(png_save_dir, save_name + '.png'), bbox_inches='tight', format='png')
       
 def merge_dict(base: dict, other: dict):
+    """Merge plot_config dict (priority: ``base``)"""
     for k in (set(base) & set(other)):
         if isinstance(base[k], list):
-            for d in [base, other]:
-                if not isinstance(d[k][-1], dict):
-                    d[k] += [dict]
-            base[k] = base[k][:-1] + other[k][:-1] \
-                      + [merge_dict(base[k][-1], other[k][-1])]
+            if base[k] and isinstance(base[k][-1], dict):
+              base[k] = base[k][:-1] + other[k][:-1] \
+                        + [merge_dict(base[k][-1], other[k][-1])]
         elif isinstance(base[k], dict):
             base[k] = merge_dict(base[k], other[k])
     for k in (set(other) - set(base)):
