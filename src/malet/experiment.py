@@ -1,4 +1,4 @@
-import os, glob, io
+import os, glob, shutil, io
 import copy
 import yaml
 import re
@@ -10,11 +10,12 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 from absl import logging
 from ml_collections.config_dict import ConfigDict
 
-from .utils import str2value
+from .utils import list2tuple, str2value
 
 Self = TypeVar("Self", bound="Experiment")
 ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, Self], dict]]
@@ -50,7 +51,7 @@ class ConfigIter:
       self.raw_config = yaml.safe_load(cnfg_str)
     
     self.name = os.path.split(exp_config_path)[0].split('/')[-1]
-    self.grid = self.raw_config.get('grid', None)
+    self.grid = self.raw_config.get('grid')
     self.static_configs = {k:self.raw_config[k] for k in set(self.raw_config)-{'grid_fields', 'grid'}}
   
     self.grid_iter = self.__get_iter()
@@ -179,15 +180,15 @@ class ExperimentLog:
                metric_fields=metric_fields, auto_update_tsv = auto_update_tsv)
 
   @classmethod
-  def from_tsv(cls, logs_file: str, auto_update_tsv: bool=True):
+  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=False):
     '''open tsv with yaml header'''
-    return cls(**cls.parse_tsv(logs_file), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+    return cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
   
   
   # tsv handlers.
   # -----------------------------------------------------------------------------
   @classmethod
-  def parse_tsv(cls, log_file: str):
+  def parse_tsv(cls, log_file: str, parse_str=True):
     '''parses tsv file into usable datas'''
     assert os.path.exists(log_file), f'File path "{log_file}" does not exists.'
 
@@ -220,7 +221,8 @@ class ExperimentLog:
       if not df.empty:
         list_filt = lambda f: isinstance(v:=df[f].iloc[0], str) and '[' in v
         list_fields = [*filter(list_filt, list(df))]
-        df[list_fields] = df[list_fields].applymap(str2value)
+        if parse_str:
+          df[list_fields] = df[list_fields].applymap(str2value)
       
     return {'static_configs': static_configs,
             'grid_fields': idx[1:],
@@ -228,16 +230,16 @@ class ExperimentLog:
             'df': df}
   
 
-  def load_tsv(self, logs_file):
+  def load_tsv(self, logs_file, parse_str=True):
     '''load tsv with yaml header'''
     if logs_file is not None:
       self.logs_file=logs_file
       
-    for k, v in self.parse_tsv(self.logs_file).items():
+    for k, v in self.parse_tsv(self.logs_file, parse_str=parse_str).items():
       self.__dict__[k] = v
   
 
-  def to_tsv(self, logs_file=None, only_final=False):
+  def to_tsv(self, logs_file=None):
     logs_file = self.logs_file if logs_file==None else logs_file
     
     logs_path, _ = os.path.split(logs_file)
@@ -268,7 +270,8 @@ class ExperimentLog:
   def update_tsv(func, mode='rw'):
     '''Decorator for read/write tsv before/after given function call'''
     def wrapped(self, *args, **kwargs):
-      if self.auto_update_tsv and 'r' in mode: self.load_tsv(self.logs_file)
+      if self.auto_update_tsv and 'r' in mode: 
+        self.load_tsv(self.logs_file)
       ret = func(self, *args, **kwargs)
       if self.auto_update_tsv and 'w' in mode: self.to_tsv()
       return ret
@@ -281,7 +284,7 @@ class ExperimentLog:
   @partial(update_tsv, mode='r')
   def add_result(self, configs, metrics=dict(), **infos):
     '''Add experiment run result to dataframe'''
-    cur_gridval = tuple(configs[k] for k in self.grid_fields)
+    cur_gridval = list2tuple([configs[k] for k in self.grid_fields])
     
     row_dict = {**infos, **metrics}
     df_row = [row_dict.get(k) for k in self.field_order]
@@ -291,7 +294,38 @@ class ExperimentLog:
       self.df = self.df.drop(cur_gridval)
     
     self.df.loc[cur_gridval] = df_row
+    
+  @staticmethod
+  def __add_column(df, new_column_name, fn, *fn_arg_fields):
+    '''Add new column field computed from existing fields in self.df'''
+    def mapper(*args):
+      if all(isinstance(i, (int, float, str)) for i in args):
+        return fn(*args)
+      elif all(isinstance(i, list) for i in args):
+        return [*map(fn, *args)]
+      return None
+    df[new_column_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
+    return df
 
+  def add_computed_metric(self, new_metric_name, fn, *fn_arg_fields):
+    '''Add new metric computed from existing metrics in self.df'''
+    self.df = self.__add_column(self.df, new_metric_name, fn, *fn_arg_fields)
+    self.metric_fields.append(new_metric_name)
+    
+  def add_derived_index(self, new_index_name, fn, *fn_arg_fields):
+    '''Add new index field computed from existing fields in self.df'''
+    df = self.df.reset_index(self.grid_fields)
+    df = self.__add_column(df, new_index_name, fn, *fn_arg_fields)
+    self.grid_fields.append(new_index_name)
+    self.df = df.set_index(self.grid_fields)
+    
+  def remove_metric(self, *metric_names):
+    self.df = self.df.drop(columns=[*metric_names])
+    self.metric_fields = [m for m in self.grid_fields if m not in metric_names]
+    
+  def remove_index(self, *field_names):
+    self.df = self.df.reset_index([*field_names], drop=True)
+    self.grid_fields = [f for f in self.grid_fields if f not in field_names]
 
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
@@ -323,19 +357,20 @@ class ExperimentLog:
     new_to_othr_sf = [sf for sf in self.grid_fields if sf not in other.grid_fields] + diff_sttc
 
     # fill in new grid_fields in each df from static_configs and configs
+    # change list configs to tuple for hashablilty
     for sf in new_to_self_sf:
-      self.df[sf] = [self.static_configs.get(sf, np.nan)]*len(self)
+      self.df[sf] = [list2tuple(self.static_configs.get(sf, np.nan))]*len(self)
 
     for sf in new_to_othr_sf:
-      other.df[sf] = [other.static_configs.get(sf, np.nan)]*len(other)
+      other.df[sf] = [list2tuple(other.static_configs.get(sf, np.nan))]*len(other)
 
     self.static_configs = new_sttc
     self.grid_fields += new_to_self_sf
     self.field_order = self.info_fields + self.metric_fields
     
     self.df, other.df = (obj.df.reset_index() for obj in (self, other))
-    self.df = self.df.merge(other.df, how='outer')[self.grid_fields+self.field_order] \
-                     .set_index(self.grid_fields)
+    self.df = pd.concat([self.df, other.df])[self.grid_fields+self.field_order] \
+                .set_index(self.grid_fields)
     return self
 
   def merge(self, *others, same=True):
@@ -344,17 +379,19 @@ class ExperimentLog:
       self.__merge_one(other, same=same)
 
   @staticmethod
-  def merge_tsv(*names, logs_path, same=True, only_final=False):
-    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv')) for n in names]
+  def merge_tsv(*names, logs_path, save_path=None, same=True):
+    if save_path is None:
+      save_path = os.path.join(logs_path, 'log_merged.tsv')
+    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv'), parse_str=False) for n in names]
     base.merge(*logs, same=same)
-    base.to_tsv(os.path.join(logs_path, 'log_merged.tsv'), only_final)
+    base.to_tsv(save_path)
 
   @staticmethod
-  def merge_folder(logs_path, only_final=False):
-    # change later if we start saving tsvs to other directories
+  def merge_folder(logs_path, save_path=None):
+    """change later if we start saving tsvs to other directories"""
     os.chdir(logs_path)
     logs = [f[:-4] for f in glob.glob("*.tsv")]
-    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, only_final=only_final)
+    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, save_path=save_path)
     
   
   # Utilities.
@@ -362,7 +399,7 @@ class ExperimentLog:
 
   def __cfg_match_row(self, config):
     grid_filt = reduce(lambda l, r: l & r, 
-                       (self.df.index.get_level_values(k)==(str(config[k]) if type(config[k])==list else config[k]) 
+                       (self.df.index.get_level_values(k)==(str(config[k]) if isinstance(config[k], list) else config[k]) 
                         for k in self.grid_fields))
     return self.df[grid_filt]
   
@@ -379,6 +416,7 @@ class ExperimentLog:
 
 
   def get_metric_and_info(self, config):
+    '''Search matching log with given config dict and return metric_dict, info_dict'''
     assert config in self, 'config should be in self when using get_metric_dict.'
     
     cfg_matched_df = self.__cfg_match_row(config)
@@ -396,29 +434,40 @@ class ExperimentLog:
     df = self.df if df is None else df
     
     # explode
-    list_fields = l, *_ = [*filter(lambda f: isinstance(df[f].iloc[0], list), list(df))]
+    list_fields = [*filter(lambda f: any([isinstance(i, list) for i in list(df[f])]), list(df))]
+    pure_list_fields = [*filter(lambda f: all([isinstance(i, list) for i in list(df[f])]), list(df))]
     nuisance_fields = [*filter(lambda f: not isinstance(df[f].iloc[0], (int, float, list)), list(df))]
     df = df.drop(nuisance_fields, axis=1)
     
-    # Create epoch field
-    df['total_epochs'] = df[l].map(len)
-    
-    if epoch is None:
-        df['epoch'] = df[l].map(lambda x: range(len(x)))
-        df = df.explode('epoch')  # explode metric list so each epoch gets its own row
-    else:
-        if epoch<0:
-            epoch += list(df['total_epochs'])[0]
-        df['epoch'] = df[l].map(lambda _: epoch)
-        
-    for m in list_fields:
-        df[m] = df.apply(lambda df: df[m][df.epoch], axis=1) # list[epoch] for all fields
-    
-    df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
+    if list_fields:
+      l, *_ = pure_list_fields
+      
+      # Create epoch field
+      df['total_epochs'] = df[l].map(len)
+      
+      df[list_fields] = df[list_fields].apply(lambda x: ([None]*df['total_epochs'] if x is None else x))
+      
+      if epoch is None:
+          df['epoch'] = df[l].map(lambda x: range(len(x)))
+          df = df.explode('epoch')  # explode metric list so each epoch gets its own row
+      else:
+          if epoch<0:
+              epoch += list(df['total_epochs'])[0]
+          df['epoch'] = df[l].map(lambda _: epoch)
+          
+      for m in list_fields:
+        df[m] = df.apply(lambda df: df[m][df.epoch] if df[m] is not np.nan and len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
+      
+      df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
     
     # melt
     df = df.melt(value_vars=list(df), var_name='metric', value_name='metric_value', ignore_index=False)
     df = df.reset_index().set_index([*df.index.names, 'metric'])
+    
+    # delete string and NaN valued rows
+    df = df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]\
+           .dropna()\
+           .astype('float')
     
     return df
 
@@ -483,8 +532,7 @@ class Experiment:
     self.__process_split()
 
     if isinstance(self.exp_bs, int) and self.exp_bs>1 or isinstance(self.exp_bs, str):
-      tsv_dir, _ = os.path.split(tsv_file)
-      tsv_file = os.path.join(tsv_dir, 'log_splits', f'split_{self.exp_bi}.tsv') # for saving seperate log for each split in plan slitting mode.
+      tsv_file = os.path.join(exp_folder_path, 'log_splits', f'split_{self.exp_bi}.tsv') # for saving seperate log for each split in plan slitting mode.
     
     self.log = self.__get_log(tsv_file, exp_metrics, auto_update_tsv)
     
@@ -580,3 +628,52 @@ class Experiment:
       self.log.to_tsv()
       
       logging.info("Saved experiment data to log")
+      
+      
+  @staticmethod
+  def resplit_logs(exp_folder_path: str, target_split: int=1, save_backup: bool=True):
+    """Resplit splitted logs into ``target_split`` number of splits."""
+    assert target_split > 0, 'Target split should be larger than 0'
+    
+    cfg_file, logs_file, _ = Experiment.get_paths(exp_folder_path)
+    logs_folder = os.path.join(exp_folder_path, 'log_splits')
+    
+    # merge original log_splits
+    if os.path.exists(logs_folder): # if log is splitted
+      os.chdir(logs_folder)
+      base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_folder, sp_n), parse_str=False) for sp_n in glob.glob("*.tsv")]
+      base.merge(*logs)
+      shutil.rmtree(logs_folder)
+    elif os.path.exists(logs_file): # if only single log file exists 
+      base = ExperimentLog.from_tsv(os.path.join(logs_file), parse_str=False)
+      shutil.rmtree(logs_file)
+    
+    # save backup
+    if save_backup:
+      base.to_tsv(os.path.join(exp_folder_path, 'logs_backup.tsv'))
+    
+    # resplit merged logs based on target_split
+    if target_split==1:
+      base.to_tsv(logs_file)
+    
+    elif target_split>1:
+      # get configs
+      configs = ConfigIter(cfg_file)
+      
+      for n in range(target_split):
+        # empty log
+        lgs = ExperimentLog.from_exp_config(configs.__dict__, 
+                                            os.path.join(logs_folder, f'split_{n}.tsv',),
+                                            base.info_fields,
+                                            base.metric_fields)
+        
+        # resplitting nth split
+        cfgs_temp = copy.deepcopy(configs)
+        cfgs_temp.filter_iter(lambda i, _: i%target_split==n)
+        for cfg in tqdm(cfgs_temp, desc=f'split: {n}/{target_split}'):
+          if cfg in base:
+            metric_dict, info_dict = base.get_metric_and_info(cfg)
+            lgs.add_result(cfg, metric_dict, **info_dict)
+          
+        lgs.to_tsv()
+
