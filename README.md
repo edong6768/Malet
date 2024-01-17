@@ -189,7 +189,7 @@ This can be done using the following arguments.
 
     are automatically generated.
 
-3. **`-multi_line_field`**: Specify the fields to plot multiple lines over.
+3. **`-multi_line_fields`**: Specify the fields to plot multiple lines over.
 
     ```bash
     -multi_line_field '{field1} {field2} ...'
@@ -220,6 +220,23 @@ This can be done using the following arguments.
 
     ```bash
     -annotate_fields '{field1} {field2} ...'
+    ```
+
+3. **`-fig_size`**: Figure size.
+    
+    - Square figure
+      ```bash
+      -fig_size 7
+      ```
+    - Rectangular figure (x, y)
+      ```bash
+      -fig_size 10 8
+      ```
+
+3. **`-style`**: Matplotlib style.
+
+    ```bash
+    -style 'ggplot'
     ```
 
 4. **`-plot_config`**: The path for a yaml file to configure all aspects the plot.
@@ -360,14 +377,14 @@ grid:
 
 #### 1. Other arguments for `malet.plot`
 
-- `-best_ref_x_field`: On defualt, each point in `x_field` get its own optimal hyperparameter set, which is sometimes undesirable.
+- `-best_ref_x_fields`: On defualt, each point in `x_field` get its own optimal hyperparameter set, which is sometimes undesirable.
 This argument lets you specify on which value of `x_field` to choose the best hyperparamter.
 
     ```bash
     -best_ref_x_field {x_field_value}
     ```
 
-- `-best_ref_ml_field`: Likewise, we might want to use the same hyperparameter for all lines in `multi_line_field` with best hyperparameter chosen from a single value in `multi_line_field`.
+- `-best_ref_ml_fields`: Likewise, we might want to use the same hyperparameter for all lines in `multi_line_field` with best hyperparameter chosen from a single value in `multi_line_field`.
 
     ```bash
     -best_ref_ml_field {ml_field_value}
