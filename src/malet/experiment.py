@@ -296,7 +296,7 @@ class ExperimentLog:
     self.df.loc[cur_gridval] = df_row
     
   @staticmethod
-  def __add_column(df, new_field_name, fn, *fn_arg_fields):
+  def __add_column(df, new_column_name, fn, *fn_arg_fields):
     '''Add new column field computed from existing fields in self.df'''
     def mapper(*args):
       if all(isinstance(i, (int, float, str)) for i in args):
@@ -304,12 +304,13 @@ class ExperimentLog:
       elif all(isinstance(i, list) for i in args):
         return [*map(fn, *args)]
       return None
-    df[new_field_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
+    df[new_column_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
     return df
 
-  def add_computed_result(self, new_field_name, fn, *fn_arg_fields):
-    '''Add new column field computed from existing fields in self.df'''
-    self.df = self.__add_column(self.df, new_field_name, fn, *fn_arg_fields)
+  def add_computed_metric(self, new_metric_name, fn, *fn_arg_fields):
+    '''Add new metric computed from existing metrics in self.df'''
+    self.df = self.__add_column(self.df, new_metric_name, fn, *fn_arg_fields)
+    self.metric_fields.append(new_metric_name)
     
   def add_derived_index(self, new_index_name, fn, *fn_arg_fields):
     '''Add new index field computed from existing fields in self.df'''
@@ -317,6 +318,14 @@ class ExperimentLog:
     df = self.__add_column(df, new_index_name, fn, *fn_arg_fields)
     self.grid_fields.append(new_index_name)
     self.df = df.set_index(self.grid_fields)
+    
+  def remove_metric(self, *metric_names):
+    self.df = self.df.drop(columns=[*metric_names])
+    self.metric_fields = [m for m in self.grid_fields if m not in metric_names]
+    
+  def remove_index(self, *field_names):
+    self.df = self.df.reset_index([*field_names], drop=True)
+    self.grid_fields = [f for f in self.grid_fields if f not in field_names]
 
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
