@@ -32,7 +32,7 @@ pip install git+https://github.com/edong6768/Malet.git
 - ml-collections 0.1.0
 - seaborn 0.11.2
 
-## Documentation
+## Documentation **(🚨 Plan to move to Sphinx-based Read the docs in near future)**
 
 ### Contents
 
