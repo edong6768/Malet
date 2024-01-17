@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
+from rich.progress import track
 
 from absl import logging
 from ml_collections.config_dict import ConfigDict
@@ -670,7 +670,7 @@ class Experiment:
         # resplitting nth split
         cfgs_temp = copy.deepcopy(configs)
         cfgs_temp.filter_iter(lambda i, _: i%target_split==n)
-        for cfg in tqdm(cfgs_temp, desc=f'split: {n}/{target_split}'):
+        for cfg in track(cfgs_temp, description=f'split: {n}/{target_split}'):
           if cfg in base:
             metric_dict, info_dict = base.get_metric_and_info(cfg)
             lgs.add_result(cfg, metric_dict, **info_dict)
