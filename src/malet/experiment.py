@@ -214,15 +214,18 @@ class ExperimentLog:
       csv_head = '\t'.join(idx+col)
       csv_str = '\n'.join([csv_head, *csv_body])
       
-      df = pd.read_csv(io.StringIO(csv_str), sep='\t').set_index(idx[1:])
+      df = pd.read_csv(io.StringIO(csv_str), sep='\t')
       df = df.drop(['id'], axis=1)
       
       # make str(list) to list
       if not df.empty:
-        list_filt = lambda f: isinstance(v:=df[f].iloc[0], str) and '[' in v
+        list_filt = lambda f: isinstance(v:=df[f].iloc[0], str) and ('[' in v or '(' in v)
         list_fields = [*filter(list_filt, list(df))]
         if parse_str:
           df[list_fields] = df[list_fields].applymap(str2value)
+      
+      # set grid_fields to multiindex
+      df = df.set_index(idx[1:])
       
     return {'static_configs': static_configs,
             'grid_fields': idx[1:],
@@ -299,7 +302,7 @@ class ExperimentLog:
   def __add_column(df, new_column_name, fn, *fn_arg_fields):
     '''Add new column field computed from existing fields in self.df'''
     def mapper(*args):
-      if all(isinstance(i, (int, float, str)) for i in args):
+      if all(isinstance(i, (int, float, str, tuple)) for i in args):
         return fn(*args)
       elif all(isinstance(i, list) for i in args):
         return [*map(fn, *args)]
@@ -448,7 +451,7 @@ class ExperimentLog:
       df[list_fields] = df[list_fields].apply(lambda x: ([None]*df['total_epochs'] if x is None else x))
       
       if epoch is None:
-          df['epoch'] = df[l].map(lambda x: range(len(x)))
+          df['epoch'] = df[l].map(lambda x: range(1, len(x)+1))
           df = df.explode('epoch')  # explode metric list so each epoch gets its own row
       else:
           if epoch<0:
@@ -562,6 +565,9 @@ class Experiment:
     if os.path.exists(logs_file): # Check if there already is a file
       log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv) # resumes automatically
     else: # Create new log
+      logs_path, _ = os.path.split(logs_file)
+      if not os.path.exists(logs_path):
+        os.makedirs(logs_path)
       log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file, self.info_field, 
                                           metric_fields=metric_fields, auto_update_tsv=auto_update_tsv)
       log.to_tsv()

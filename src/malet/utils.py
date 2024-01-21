@@ -46,10 +46,10 @@ def str2value(value_str):
     match_unique = lambda p: (m:=re.findall(p, value_str)) and len(m)==1 and m[0]==value_str
     # list
     if '[' in value_str:
-      return [str2value(v) for v in value_str[1:-1].split(',')]
+      return [str2value(v) for v in value_str[1:-1].split(',') if v!='']
     # tuple
     if '(' in value_str:
-      return tuple(str2value(v) for v in value_str[1:-1].split(','))
+      return tuple(str2value(v) for v in value_str[1:-1].split(',') if v!='')
     # sci. notation
     elif match_unique('-?\d\.?\d*e[+-]\d+'):
       return float(value_str) 

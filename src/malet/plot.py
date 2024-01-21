@@ -65,10 +65,12 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         # get dataframe, drop unused metrics for efficient process
         pai_history = ExperimentLog.from_tsv(tsv_file)
+        assert metric in pai_history.df, f'Metric {metric} not in log. Choose between {list(pai_history.df)}'
+        
         if 'metric' not in pmlf and 'metric' not in x_fields:
             pai_history.df = pai_history.df.drop(list(set(pai_history.df)-{metric, pcfg['best_ref_metric_field']}), axis=1)
         
-        df = pai_history.explode_and_melt_metric(epoch=None if 'epoch' not in x_fields else -1)
+        df = pai_history.explode_and_melt_metric(epoch=None if 'epoch' in x_fields or 'epoch' in pflt else -1)
         base_config = ConfigDict(pai_history.static_configs)
         
         
@@ -97,6 +99,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         best_over = set(df.index.names) - {*x_fields, 'metric', 'seed', *pmlf}
         best_at_max = pcfg['best_at_max']
         if 'epoch' in x_fields:
+            if not pcfg['best_ref_x_fields']:
+                pcfg['best_ref_x_fields'] = ['']*len(x_fields)
             i = x_fields.index('epoch')
             if 'num_epochs' in base_config:
                 pcfg['best_ref_x_fields'][i]=base_config.num_epochs-1
@@ -154,6 +158,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         if pcfg['colors']=='':
             colors = iter(sns.color_palette()*10)
+            # colors = iter(sns.color_palette("Blues")[3:6] + sns.color_palette("magma")[3:5])
         elif pcfg['colors']=='cont':
             colors = iter([c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:])])# if i%2])
         
