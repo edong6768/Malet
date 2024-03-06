@@ -1,5 +1,5 @@
 import os, shutil
-import re
+from ast import literal_eval
 
 from rich.table import Table
 
@@ -35,34 +35,7 @@ def list2tuple(l):
     return {k: list2tuple(v) for k, v in l.items()}
   return l
     
-    
+
 def str2value(value_str):
-    """Casts string to corresponding field type"""
-    if not isinstance(value_str, str): return value_str
-    value_str = value_str.strip() \
-                         .replace('\\', '') \
-                         .replace('\'', '') \
-                         .replace('"', '')
-    match_unique = lambda p: (m:=re.findall(p, value_str)) and len(m)==1 and m[0]==value_str
-    # list
-    if '[' in value_str:
-      return [str2value(v) for v in value_str[1:-1].split(',') if v!='']
-    # tuple
-    if '(' in value_str:
-      return tuple(str2value(v) for v in value_str[1:-1].split(',') if v!='')
-    # sci. notation
-    elif match_unique('-?\d\.?\d*e[+-]\d+'):
-      return float(value_str) 
-    # float
-    elif match_unique('-?\d*\.\d*'):
-      return float(value_str)
-    # int
-    elif match_unique('-?\d+'):
-      return int(value_str) 
-    # bool
-    elif value_str in {'True', 'False'}:
-      return value_str=='True'
-    # NaN
-    elif value_str.lower()=='nan':
-      return None
-    return value_str
+    """Casts string back to standard python types"""
+    return literal_eval(value_str) if isinstance(value_str, str) else value_str
