@@ -37,6 +37,16 @@ def get_plot_config(plot_config: dict, plot_args: dict):
         return merge_dict(p_cfg, p_cfg_base)
     else:
         return {**plot_args, **p_cfg}
+    
+def __save_name_builder(pflt, pmlf, pcfg, save_name=''):
+    if pflt:
+        save_name += pflt.replace(' / ', '-').replace(' ', '_')
+    if pmlf:
+        save_name = '-'.join([*pmlf, save_name])
+    if any([pcfg[f'best_ref_{k}'] for k in ['x_fields', 'metric_field', 'ml_fields']]):
+        save_name +=  f"-({pcfg['best_ref_x_fields']}, {pcfg['best_ref_metric_field']}, {pcfg['best_ref_ml_fields']})"
+    save_name += "-max" if pcfg['best_at_max'] else "-min"
+    return save_name
 
 
 def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
@@ -53,6 +63,10 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             assert len(x_fields)==1, f'Number of x_fields shoud be 1 when using curve mode, but you passed {len(x_fields)}.'
             ax_draw = ax_draw_curve
             y_label = metric.replace('_', ' ').capitalize()
+        elif mode=='curve_best':
+            assert len(x_fields)==1, f'Number of x_fields shoud be 1 when using curve mode, but you passed {len(x_fields)}.'
+            ax_draw = ax_draw_best_stared_curve
+            y_label = metric.replace('_', ' ').capitalize()
         elif mode=='bar':
             assert len(x_fields)==1, f'Number of x_fields shoud be 1 when using bar mode, but you passed {len(x_fields)}.'
             ax_draw = ax_draw_bar
@@ -64,48 +78,54 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             y_label = x_fields[1].replace('_', ' ').capitalize()
         
         # get dataframe, drop unused metrics for efficient process
-        pai_history = ExperimentLog.from_tsv(tsv_file)
-        assert metric in pai_history.df, f'Metric {metric} not in log. Choose between {list(pai_history.df)}'
+        log = ExperimentLog.from_tsv(tsv_file)
+        assert metric in log.df, f'Metric {metric} not in log. Choose between {list(log.df)}'
         
-        if 'metric' not in pmlf and 'metric' not in x_fields:
-            pai_history.df = pai_history.df.drop(list(set(pai_history.df)-{metric, pcfg['best_ref_metric_field']}), axis=1)
-        
-        df = pai_history.explode_and_melt_metric(epoch=None if 'epoch' in x_fields or 'epoch' in pflt else -1)
-        base_config = ConfigDict(pai_history.static_configs)
-        
-        
-        #---filter df according to FLAGS.filter
+        #--- initial filter for df according to FLAGS.filter (except epoch and metric)
         if pflt:
-            save_name += pflt.replace(' / ', '-').replace(' ', '_')
-            filt_dict = map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/')) # split ' ' except ', '
-            df = select_df(df, {fk:[*map(str2value, fvs)] for fk, *fvs in filt_dict}) 
+            filt_dict = [*map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/'))] # split ' ' except ', '
+            log.df = select_df(log.df, {fk:[*map(str2value, fvs)] for fk, *fvs in filt_dict if fk not in {'step', 'metric'}})
+        
+        #--- melt and explode metric in log.df
+        if 'metric' not in pmlf and 'metric' not in x_fields:
+            log.df = log.df.drop(list(set(log.df)-{metric, pcfg['best_ref_metric_field']}), axis=1)
+        df = log.melt_and_explode_metric(step=None if 'step' in x_fields or 'step' in pflt else -1)
+        
+        assert not df.empty, f'Metric {metric}' +\
+            (f' and best_ref_metric_field {pcfg["best_ref_metric_field"]} are' if pcfg["best_ref_metric_field"] else ' is') +\
+                ' NaN in given dataframe.'
+        
+        #---filter df according to FLAGS.filter step and metrics
+        if pflt:
+            e_rng = lambda fvs: [*range(*map(int, fvs[0].split(':')))] if (len(fvs)==1 and ':' in fvs[0]) else fvs # CNG 'a:b' step filter later
+            df = select_df(df, {fk:[*map(str2value, e_rng(fvs))] for fk, *fvs in filt_dict if fk in {'step', 'metric'}}) 
+        
         
         #---set mlines according to FLAGS.multi_line_fields
         if pmlf:
-            save_name = '-'.join([*pmlf, save_name])
-            mlines = [sorted(set(df.index.get_level_values(f)), key=str2value) for f in pmlf]
-            mlines = product(*mlines)
+            mlines = product(*[sorted(set(df.index.get_level_values(f)), key=str2value) for f in pmlf])
         else:
             pmlf, mlines = ['metric'], [[metric]]
             pcfg['ax_style'].pop('legend', None)
         
-        #---preprocess best_ref_x_fields, enter other configs in save name
+        #---preprocess best_ref_x_fields
         pcfg['best_ref_x_fields'] = [*map(str2value, pcfg['best_ref_x_fields'])]
-        if any([pcfg[f'best_ref_{k}'] for k in ['x_fields', 'metric_field', 'ml_fields']]):
-            save_name +=  f"-({pcfg['best_ref_x_fields']}, {pcfg['best_ref_metric_field']}, {pcfg['best_ref_ml_fields']})"
-        
-        save_name += "-max" if pcfg['best_at_max'] else "-min"
         
         best_over = set(df.index.names) - {*x_fields, 'metric', 'seed', *pmlf}
         best_at_max = pcfg['best_at_max']
-        if 'epoch' in x_fields:
+        
+        if 'step' in x_fields:
             if not pcfg['best_ref_x_fields']:
                 pcfg['best_ref_x_fields'] = ['']*len(x_fields)
-            i = x_fields.index('epoch')
-            if 'num_epochs' in base_config:
-                pcfg['best_ref_x_fields'][i]=base_config.num_epochs-1
-            elif 'num_epochs' in df.index.names:
-                pcfg['best_ref_x_fields'][i]=min(*df.index.get_level_values('num_epochs'))-1
+            i = x_fields.index('step')
+            if 'step' in pflt:
+                st = [i for i in filt_dict if 'step' in i][0][1]
+                pcfg['best_ref_x_fields'][i] = int(st.split(':')[1])-1 if ':' in st else int(st) # CNG 'a:b' step filter later
+            else:
+                pcfg['best_ref_x_fields'][i]=min(*df.index.get_level_values('total_steps'))-1
+                
+        # build save name
+        save_name = __save_name_builder(pflt, pmlf, pcfg, save_name=save_name)
         
         # Notify selected plot configs and field handling statistics
         specified_field = {k for k in best_over if len(set(df.index.get_level_values(k)))==1}
@@ -126,6 +146,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                         ), align='center'
                 ))
 
+        
         
         ############################# Prepare dataframe #############################
         
@@ -158,7 +179,6 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         if pcfg['colors']=='':
             colors = iter(sns.color_palette()*10)
-            # colors = iter(sns.color_palette("Blues")[3:6] + sns.color_palette("magma")[3:5])
         elif pcfg['colors']=='cont':
             colors = iter([c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:])])# if i%2])
         
@@ -188,6 +208,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                          annotate=pcfg['annotate'],
                          annotate_field=pcfg['annotate_field'],
                          std_plot=pcfg['std_plot'],
+                         best_at_max=best_at_max,
                          **pcfg['line_style'])
         
         return fig, ax, y_label, save_name.strip('-')
@@ -199,18 +220,33 @@ def run(argv, preprcs_df):
     
     # Preprocess plot_config
     flag_dict = FLAGS.flag_values_dict()
-    fig_size = flag_dict.pop('fig_size')
     
     plot_config = {**default_style, **flag_dict}
     if FLAGS.plot_config!='':
         with open(FLAGS.plot_config) as f:
             plot_config = yaml.safe_load(f.read())
             plot_config = get_plot_config(plot_config, flag_dict)
+    
+    # set ax_style related arguments
+    fig_size = flag_dict.pop('fig_size')
     if fig_size:
         if len(fig_size)==1:
             fig_size = fig_size*2
         fig_size = [*map(float, fig_size)]
         plot_config['ax_style']['fig_size'] = fig_size
+    
+    title = flag_dict.pop('title')
+    if title:
+        plot_config['ax_style']['title'] = [title, {'size': flag_dict['font_size']}]
+        
+    xlabel = flag_dict.pop('xlabel')
+    if xlabel:
+        plot_config['ax_style']['xlabel'] = [xlabel, {'size': flag_dict['font_size']}]
+        
+    ylabel = flag_dict.pop('ylabel')
+    if ylabel:
+        plot_config['ax_style']['ylabel'] = [ylabel, {'size': flag_dict['font_size']}]
+        
     
     # set style
     style.use(plot_config['style'])
@@ -219,7 +255,7 @@ def run(argv, preprcs_df):
     _, tsv_file, fig_dir = Experiment.get_paths(plot_config['exp_folder'])
     save_dir = os.path.join(fig_dir, plot_config['mode'])
     
-    if plot_config['mode'].split('-')[0] in {'curve', 'bar', 'heatmap'}:
+    if plot_config['mode'].split('-')[0] in {'curve', 'curve_best', 'bar', 'heatmap'}:
         fig, ax, y_label, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
         ax.set_ylabel(y_label)
     else:
@@ -245,10 +281,14 @@ def main(preprcs_df = lambda *x: x):
     
     flags.DEFINE_string('plot_config', '', "Yaml file path for various plot setups.")
     flags.DEFINE_string('colors', '', "color scheme ('', 'cont').")
-    flags.DEFINE_string('style', 'ggplot', "Matplotlib style.")
+    flags.DEFINE_string('style', 'default', "Matplotlib style.")
     flags.DEFINE_bool('annotate', True, 'Run multiple plot according to given config.')
     flags.DEFINE_spaceseplist('annotate_field', '', 'List of fields to include in annotation.')
     flags.DEFINE_spaceseplist('fig_size', '', 'Figure size.')
+    flags.DEFINE_string('title', '', "Title.")
+    flags.DEFINE_string('xlabel', '', "Label of x-axis.")
+    flags.DEFINE_string('ylabel', '', "Label of y-axis.")
+    flags.DEFINE_integer('font_size', 22, "Font size of title and label.")
 
     app.run(partial(run, preprcs_df=preprcs_df))
     
