@@ -1,8 +1,8 @@
 from typing import Literal
 
-import pandas as pd
-import matplotlib as mpl
 import numpy as np
+import pandas as pd
+from matplotlib.axes import Axes
 
 
 # Data Processors.
@@ -79,20 +79,21 @@ def avgbest_df(df, metric_field,
 # Plotters.
 # -----------------------------------------------------------------------------
 
-def ax_draw_curve(ax: mpl.axes.Axes,
+def ax_draw_curve(ax: Axes,
                   df: pd.DataFrame,
                   label: str,
                   annotate = True,
                   annotate_field = [],
                   std_plot: Literal['none','fill','bar'] = 'fill',
                   unif_xticks = False,
+                #   unif_xticks = True,
                   color = 'orange', 
                   linewidth = 4, 
                   marker = 'D', 
                   markersize = 10, 
                   markevery = 20,
                   **_
-    ) -> mpl.axes.Axes:
+    ) -> Axes:
     """
     Draws curve of y_field over arbitrary x_field setted as index of the dataframe.
     If there is column 'y_field_sdv' is in dataframe, draws in errorbar or fill_between depending on ``sdv_bar_plot``
@@ -130,7 +131,8 @@ def ax_draw_curve(ax: mpl.axes.Axes,
             abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
                                       [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
             abv_annot = [*map(abv, annotate_field)]
-            for x,y,t in zip(x_values, metric_values, tick_values):
+            for i, (x,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
+                if i%markevery: continue
                 txt = '\n'.join([f'{y:.5f}']+['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
     
@@ -139,7 +141,7 @@ def ax_draw_curve(ax: mpl.axes.Axes,
     return ax
 
 
-def ax_draw_bar(ax: mpl.axes.Axes,
+def ax_draw_bar(ax: Axes,
                 df: pd.DataFrame,
                 label: str,
                 annotate = True,
@@ -148,7 +150,7 @@ def ax_draw_bar(ax: mpl.axes.Axes,
                 unif_xticks = False,
                 color = 'orange',
                 **_
-    ) -> mpl.axes.Axes:
+    ) -> Axes:
     """
     Draws bar graph of y_field over arbitrary x_field setted as index of the dataframe.
     If there is column 'y_field_sdv' is in dataframe, draws in errorbar or fill_between depending on ``sdv_bar_plot``
@@ -182,38 +184,42 @@ def ax_draw_bar(ax: mpl.axes.Axes,
     return ax
 
 
-def ax_draw_heatmap(ax: mpl.axes.Axes,
+def ax_draw_heatmap(ax: Axes,
                     df: pd.DataFrame,
                     cmap = 'magma', 
+                    annotate=True,
+                    annotate_field=[],
                     **_
-        ) -> mpl.axes.Axes:
+        ) -> Axes:
     """
     Draws heatmap of y_field over two arbitrary x_fields setted as multi-index of the dataframe.
     """
     
-    df = df.drop(columns=[list(df)[i] for i in range(1, len(df.columns))])
+    grid_df = df.drop(columns=[list(df)[i] for i in range(1, len(df.columns))])
+    y_field = list(df)[0]
     
-    x_fields = df.index.names
-    *x_values, = map(lambda l: sorted(set(df.index.get_level_values(l))), x_fields)
-    df = df.reset_index()\
+    x_fields = grid_df.index.names
+    *x_values, = map(lambda l: sorted(set(grid_df.index.get_level_values(l))), x_fields)
+    grid_df = grid_df.reset_index()\
            .pivot(index=x_fields[1], columns=x_fields[0])
     
-    ax.pcolor(df, cmap=cmap, edgecolors='w')
+    ax.pcolor(grid_df, cmap=cmap, edgecolors='w')
     
     ax.set_xticks(np.arange(0.5, len(x_values[0]), 1), x_values[0], fontsize=10, rotation=45)
     ax.set_yticks(np.arange(0.5, len(x_values[1]), 1), x_values[1], fontsize=10)
     
         
-    # if annotate:
+    if annotate:
+        assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+        annotate_field = set(annotate_field) & a
+        abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
+                                [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
+        abv_annot = [*map(abv, annotate_field)]
         
-    #     assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
-    #     annotate_field = set(annotate_field) & a
-    #     abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
-    #                             [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
-    #     abv_annot = [*map(abv, annotate_field)]
-    #     for x,y,t in zip(x_values, metric_values, tick_values):
-    #         txt = '\n'.join([f'{y:.5f}']+['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
-    #         ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+        for i, (mtc, x) in enumerate([*grid_df]):
+            for j, y in enumerate([*grid_df.index.get_level_values(0)]):
+                txt = '\n'.join([f'{grid_df.loc[y, (mtc, x)]:.5f}']+[f'{i}={df.loc[(x, y), j]}' for i, j in zip(abv_annot, annotate_field)])
+                ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
     
     # ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
 
