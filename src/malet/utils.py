@@ -59,6 +59,9 @@ def str2value(value_str):
     # int
     elif match_unique('-?\d+'):
       return int(value_str) 
+    # bool
+    elif value_str in {'True', 'False'}:
+      return value_str=='True'
     # NaN
     elif value_str.lower()=='nan':
       return None

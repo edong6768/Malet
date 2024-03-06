@@ -9,14 +9,18 @@ from matplotlib.axes import Axes
 # -----------------------------------------------------------------------------
 def select_df(df, filt_dict, *exclude_fields, drop=False):
     """Select df rows with matching from given filt_dict except ``exclude_fields``"""
+    assert not df.empty, 'Given dataframe is empty.'
     assert not (k:=set(filt_dict.keys()) - set(df.index.names)), f'filt_dict keys {k} is not in df.'
+    if not filt_dict: return df
+    
     filt_keys = set(filt_dict.keys()) - set(exclude_fields)    # filter out exclude field
     
     nest = lambda vs: vs if isinstance(vs, list) else [vs]
-    for k in filt_keys:
+    for i, k in enumerate(filt_keys):
         values = nest(filt_dict[k])
         assert not (v:=set(values)-(vs:=set(df.index.get_level_values(k)))), f"Values {v} are not in field '{k}': {sorted(vs)}"
         df = df.loc[df.index.get_level_values(k).isin(values)]
+        assert not df.empty, f"Filter {k}:{values} return empty dataframe. Inspect {dict((k, filt_dict[k]) for k in filt_keys[:i+1])}" 
     
     if drop:
         df = df.reset_index([*filt_keys], drop=True)
@@ -66,8 +70,12 @@ def avgbest_df(df, metric_field,
         # find best result over best_over for best_of
         df_fields -= set(best_over)
         best_df = select_df(df, best_of)
-        best_df = best_df.loc[best_df.groupby([*df_fields])[metric_field]
-                                     .aggregate(('idxmin', 'idxmax')[best_at_max])]
+        if df_fields:
+            best_df = best_df.loc[best_df.groupby([*df_fields])[metric_field]
+                                         .aggregate(('idxmin', 'idxmax')[best_at_max])]
+        else: # need since groupby returns series and causes error when df_fields is empty
+            best_df = best_df.loc[best_df[metric_field].aggregate(('idxmin', 'idxmax')[best_at_max])]
+            
 
         # match best_over values for non-best_of-key-index with best_of-key-index
         df_fields -= set(best_of)
@@ -103,11 +111,18 @@ def ax_draw_curve(ax: Axes,
     
     x_values, metric_values = map(np.array, zip(*dict(df[y_field]).items()))
     assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
+    
+    if len(x_values)>100:
+        marker = None
+        if unif_xticks: ax.locator_params(tight=True, nbins=5)
+    elif len(x_values)>20:
+        markevery = 20
+        if unif_xticks: ax.locator_params(tight=True, nbins=5)
+    else:
+        markevery = 1
+    
     tick_values = x_values
-    if unif_xticks:
-        tick_values = np.arange(len(x_values))
-        ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
-        
+    
     if len(tick_values)==1:
         ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
         if f'{y_field}_std' in df:
@@ -115,6 +130,10 @@ def ax_draw_curve(ax: Axes,
             ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
 
     else:
+        if unif_xticks:
+            tick_values = np.arange(len(x_values))
+            ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
+            
         ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
                 marker=marker, markersize=markersize, markevery=markevery)
         if f'{y_field}_std' in df:
@@ -133,7 +152,92 @@ def ax_draw_curve(ax: Axes,
             abv_annot = [*map(abv, annotate_field)]
             for i, (x,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
                 if i%markevery: continue
-                txt = '\n'.join([f'{y:.5f}']+['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
+                txt = '\n'.join([f'{y:.5f}', str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
+                ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+    
+    ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
+
+    return ax
+
+def ax_draw_best_stared_curve(ax: Axes,
+                  df: pd.DataFrame,
+                  label: str,
+                  annotate = True,
+                  annotate_field = [],
+                  std_plot: Literal['none','fill','bar'] = 'fill',
+                  best_at_max=True,
+                  unif_xticks = False,
+                #   unif_xticks = True,
+                  color = 'orange', 
+                  linewidth = 4, 
+                  marker = 'D', 
+                  markersize = 10, 
+                  markevery = 20,
+                  **_
+    ) -> Axes:
+    """
+    Draws curve of y_field over arbitrary x_field setted as index of the dataframe.
+    If there is column 'y_field_sdv' is in dataframe, draws in errorbar or fill_between depending on ``sdv_bar_plot``
+    """
+    assert std_plot in {'bar', 'fill', 'none'}, 'std_plot should be one of {"bar","fill","none"}'
+    y_field = list(df)[0]
+    
+    x_values, metric_values = map(np.array, zip(*dict(df[y_field]).items()))
+    assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
+    
+    if len(x_values)>100:
+        marker = None
+        if unif_xticks: ax.locator_params(tight=True, nbins=5)
+    elif len(x_values)>20:
+        markevery = 20
+        if unif_xticks: ax.locator_params(tight=True, nbins=5)
+    else:
+        markevery = 1
+    
+    tick_values = x_values
+    
+    if len(tick_values)==1:
+        ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
+        if f'{y_field}_std' in df:
+            metric_std = float(df[f'{y_field}_std'])
+            ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
+
+    else:
+        if unif_xticks:
+            tick_values = np.arange(len(x_values))
+            ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
+            
+        ax.plot(tick_values, metric_values, color=color, linewidth=linewidth)
+        if f'{y_field}_std' in df:
+            x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
+            
+            if std_plot=='bar':
+                ax.errorbar(tick_values, metric_values, yerr=metric_std, color=color, elinewidth=3)
+            elif std_plot=='fill':
+                ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
+                
+        best_idx = list(metric_values).index((max if best_at_max else min)(metric_values))
+        for i, (_,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
+            if i%markevery: continue
+            if i==0:
+                ax.plot(tick_values[i], metric_values[i], label=label, color=color, linewidth=linewidth,
+                        marker=marker, markersize=markersize, markevery=markevery)
+            elif i==best_idx:
+                ax.plot(tick_values[i], metric_values[i], color='green', marker='*', markersize=markersize+10)
+            else:
+                ax.plot(tick_values[i], metric_values[i], color=color, 
+                        marker=marker, markersize=markersize, markevery=markevery)
+                
+                
+        if annotate:
+            assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+            annotate_field = set(annotate_field) & a
+            abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
+                                      [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
+            abv_annot = [*map(abv, annotate_field)]
+            for i, (x,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
+                if i%markevery: continue
+                txt = '\n'.join([f'{y:.5f}', str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
@@ -207,7 +311,6 @@ def ax_draw_heatmap(ax: Axes,
     
     ax.set_xticks(np.arange(0.5, len(x_values[0]), 1), x_values[0], fontsize=10, rotation=45)
     ax.set_yticks(np.arange(0.5, len(x_values[1]), 1), x_values[1], fontsize=10)
-    
         
     if annotate:
         assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
@@ -222,5 +325,4 @@ def ax_draw_heatmap(ax: Axes,
                 ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
     
     # ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
-
     return ax
