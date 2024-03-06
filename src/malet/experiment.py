@@ -166,6 +166,7 @@ class ExperimentLog:
   def __post_init__(self):
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
+      assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
       columns = self.grid_fields + self.info_fields + self.metric_fields
       self.df = pd.DataFrame(columns=columns).set_index(self.grid_fields)
     else:
@@ -302,10 +303,8 @@ class ExperimentLog:
   def __add_column(df, new_column_name, fn, *fn_arg_fields):
     '''Add new column field computed from existing fields in self.df'''
     def mapper(*args):
-      if all(isinstance(i, (int, float, str, tuple)) for i in args):
+      if all(isinstance(i, (int, float, str, tuple, list)) for i in args):
         return fn(*args)
-      elif all(isinstance(i, list) for i in args):
-        return [*map(fn, *args)]
       return None
     df[new_column_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
     return df
@@ -390,11 +389,11 @@ class ExperimentLog:
     base.to_tsv(save_path)
 
   @staticmethod
-  def merge_folder(logs_path, save_path=None):
+  def merge_folder(logs_path, save_path=None, same=True):
     """change later if we start saving tsvs to other directories"""
     os.chdir(logs_path)
     logs = [f[:-4] for f in glob.glob("*.tsv")]
-    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, save_path=save_path)
+    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, save_path=save_path, same=same)
     
   
   # Utilities.
@@ -433,39 +432,29 @@ class ExperimentLog:
     return fields(self)==fields(other)
     
     
-  def explode_and_melt_metric(self, df=None, epoch=None):
-    df = self.df if df is None else df
-    
-    # explode
-    list_fields = [*filter(lambda f: any([isinstance(i, list) for i in list(df[f])]), list(df))]
-    pure_list_fields = [*filter(lambda f: all([isinstance(i, list) for i in list(df[f])]), list(df))]
-    nuisance_fields = [*filter(lambda f: not isinstance(df[f].iloc[0], (int, float, list)), list(df))]
-    df = df.drop(nuisance_fields, axis=1)
-    
-    if list_fields:
-      l, *_ = pure_list_fields
-      
-      # Create epoch field
-      df['total_epochs'] = df[l].map(len)
-      
-      df[list_fields] = df[list_fields].apply(lambda x: ([None]*df['total_epochs'] if x is None else x))
-      
-      if epoch is None:
-          df['epoch'] = df[l].map(lambda x: range(1, len(x)+1))
-          df = df.explode('epoch')  # explode metric list so each epoch gets its own row
-      else:
-          if epoch<0:
-              epoch += list(df['total_epochs'])[0]
-          df['epoch'] = df[l].map(lambda _: epoch)
-          
-      for m in list_fields:
-        df[m] = df.apply(lambda df: df[m][df.epoch] if df[m] is not np.nan and len(df[m])>df.epoch else None, axis=1) # list[epoch] for all fields
-      
-      df = df.reset_index().set_index([*df.index.names, 'epoch', 'total_epochs'])
+  def melt_and_explode_metric(self, df=None, step=None):
+    if df is None: 
+      df = self.df
+    mov_to_index = lambda *fields: df.reset_index().set_index([*df.index.names, *fields])
     
     # melt
     df = df.melt(value_vars=list(df), var_name='metric', value_name='metric_value', ignore_index=False)
-    df = df.reset_index().set_index([*df.index.names, 'metric'])
+    df = mov_to_index('metric')
+    
+    # Create step field and explode
+    pseudo_len = lambda x: len(x) if isinstance(x, list) else 1
+    
+    df['total_steps'] = df['metric_value'].map(pseudo_len)
+    
+    if step is None:
+        df['step'] = df['metric_value'].map(lambda x: range(1, pseudo_len(x)+1))
+        df = df.explode('step')  # explode metric list so each step gets its own row
+    else:
+        df['step'] = df['metric_value'].map(lambda x: step + (pseudo_len(x) if step<0 else 0))
+    
+    df['metric_value'] = df.apply(lambda df: df['metric_value'][df.step-1] if isinstance(df['metric_value'], list) else df['metric_value'], axis=1) # list[epoch] for all fields
+    
+    df = mov_to_index('step', 'total_steps')
     
     # delete string and NaN valued rows
     df = df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]\
