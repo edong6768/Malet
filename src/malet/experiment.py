@@ -155,7 +155,6 @@ class ExperimentLog:
   static_configs: dict
   grid_fields: list
   logs_file: str
-  info_fields: list
   
   metric_fields: Optional[list] = None
   df: Optional[pd.DataFrame]=None
@@ -167,17 +166,15 @@ class ExperimentLog:
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
       assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
-      columns = self.grid_fields + self.info_fields + self.metric_fields
-      self.df = pd.DataFrame(columns=columns).set_index(self.grid_fields)
+      self.df = pd.DataFrame(columns=self.grid_fields+self.metric_fields).set_index(self.grid_fields)
     else:
-      self.metric_fields = [i for i in list(self.df) if i not in self.info_fields]
-    self.field_order = self.info_fields + self.metric_fields
+      self.metric_fields = list(self.df)
   
   # Constructors.
   # -----------------------------------------------------------------------------  
   @classmethod
-  def from_exp_config(cls, exp_config, logs_file: str, info_fields: list, metric_fields: Optional[list]=None, auto_update_tsv: bool=False):
-    return cls(*(exp_config[k] for k in ['static_configs', 'grid_fields']), logs_file=logs_file, info_fields=info_fields,
+  def from_exp_config(cls, exp_config, logs_file: str, metric_fields: Optional[list]=None, auto_update_tsv: bool=False):
+    return cls(*(exp_config[k] for k in ['static_configs', 'grid_fields']), logs_file=logs_file,
                metric_fields=metric_fields, auto_update_tsv = auto_update_tsv)
 
   @classmethod
@@ -218,19 +215,15 @@ class ExperimentLog:
       df = pd.read_csv(io.StringIO(csv_str), sep='\t')
       df = df.drop(['id'], axis=1)
       
-      # make str(list) to list
-      if not df.empty:
-        list_filt = lambda f: isinstance(v:=df[f].iloc[0], str) and ('[' in v or '(' in v)
-        list_fields = [*filter(list_filt, list(df))]
-        if parse_str:
-          df[list_fields] = df[list_fields].applymap(str2value)
+      if parse_str:
+          df = df.applymap(str2value)
       
       # set grid_fields to multiindex
       df = df.set_index(idx[1:])
       
     return {'static_configs': static_configs,
             'grid_fields': idx[1:],
-            'info_fields': list(df),
+            'metric_fields': list(df),
             'df': df}
   
 
@@ -286,18 +279,33 @@ class ExperimentLog:
   # -----------------------------------------------------------------------------
   
   @partial(update_tsv, mode='r')
-  def add_result(self, configs, metrics=dict(), **infos):
+  def add_result(self, configs, **metrics):
     '''Add experiment run result to dataframe'''
+    if configs in self:
+      cur_gridval = list2tuple([configs[k] for k in self.grid_fields])
+      self.df = self.df.drop(cur_gridval)
+    
+    configs = {k:list2tuple(configs[k]) for k in self.grid_fields}
+    metrics = {k:metrics.get(k) for k in self.metric_fields}
+    result_dict = {k:[v] for k, v in {**configs, **metrics}.items()}
+    result_df = pd.DataFrame(result_dict).set_index(self.grid_fields)
+    self.df = pd.concat([self.df, result_df])[self.metric_fields]
+    
+    # Dataframe.loc based code
+    # problem: pandas unable to distinguish between 
+    #              ``.loc[(col_idx, row_idx)]`` and ``.loc[(multi_idx_1, multi_idx_2)]``
+    #          for 2-level multiindex dataframe
+    """
     cur_gridval = list2tuple([configs[k] for k in self.grid_fields])
     
-    row_dict = {**infos, **metrics}
-    df_row = [row_dict.get(k) for k in self.field_order]
+    df_row = [metrics.get(k) for k in self.field_order]
       
     # Write over metric results if there is a config saved
     if configs in self:
       self.df = self.df.drop(cur_gridval)
     
     self.df.loc[cur_gridval] = df_row
+    """
     
   @staticmethod
   def __add_column(df, new_column_name, fn, *fn_arg_fields):
@@ -368,11 +376,10 @@ class ExperimentLog:
 
     self.static_configs = new_sttc
     self.grid_fields += new_to_self_sf
-    self.field_order = self.info_fields + self.metric_fields
     
     self.df, other.df = (obj.df.reset_index() for obj in (self, other))
-    self.df = pd.concat([self.df, other.df])[self.grid_fields+self.field_order] \
-                .set_index(self.grid_fields)
+    self.df = pd.concat([self.df, other.df]) \
+                .set_index(self.grid_fields)[self.metric_fields]
     return self
 
   def merge(self, *others, same=True):
@@ -411,20 +418,19 @@ class ExperimentLog:
     '''Check if specific experiment config was already executed in log.'''
     if self.df.empty: return False
 
-    cfg_same_with = lambda dct: [config[d]==dct[d] for d in dct.keys()]
+    cfg_same_in_static = all([config[k]==v for k, v in self.static_configs.items() if k in config])
     cfg_matched_df = self.__cfg_match_row(config)
     
-    return all(cfg_same_with(self.static_configs)) and not cfg_matched_df.empty
+    return cfg_same_in_static and not cfg_matched_df.empty
 
 
-  def get_metric_and_info(self, config):
+  def get_metric(self, config):
     '''Search matching log with given config dict and return metric_dict, info_dict'''
     assert config in self, 'config should be in self when using get_metric_dict.'
     
     cfg_matched_df = self.__cfg_match_row(config)
     metric_dict = {k:(v.iloc[0] if not (v:=cfg_matched_df[k]).empty else None) for k in self.metric_fields}
-    info_dict = {k:(v.iloc[0] if not (v:=cfg_matched_df[k]).empty else None) for k in self.info_fields}
-    return metric_dict, info_dict
+    return metric_dict
 
   def is_same_exp(self, other):
     '''Check if both logs have same config fields.'''
@@ -458,8 +464,8 @@ class ExperimentLog:
     
     # delete string and NaN valued rows
     df = df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]\
-           .dropna()\
-           .astype('float')
+              .dropna()\
+              .astype('float')
     
     return df
 
@@ -492,8 +498,6 @@ class Experiment:
     - (current run checking) Save configs of currently running experiments to tsv so other running code can know.
   - Saves experiment logs, automatically resumes experiment using saved log.
   '''
-  info_field: ClassVar[list] = ['datetime', 'status']
-  
   __RUNNING: ClassVar[str] = 'R'
   __FAILED: ClassVar[str] = 'F'
   __COMPLETED: ClassVar[str] = 'C'
@@ -557,7 +561,7 @@ class Experiment:
       logs_path, _ = os.path.split(logs_file)
       if not os.path.exists(logs_path):
         os.makedirs(logs_path)
-      log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file, self.info_field, 
+      log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file,
                                           metric_fields=metric_fields, auto_update_tsv=auto_update_tsv)
       log.to_tsv()
     return log
@@ -571,8 +575,8 @@ class Experiment:
     return cfg_file, tsv_file, fig_dir
   
   def get_log_checkpoint(self, config, empty_metric):
-    metric_dict, info_dict = self.log.get_metric_and_info(config)
-    if info_dict['status'] == self.__FAILED:
+    metric_dict = self.log.get_metric(config)
+    if metric_dict['status'] == self.__FAILED:
       return metric_dict
     return empty_metric
     
@@ -593,8 +597,8 @@ class Experiment:
     for i, config in enumerate(self.configs):
 
       if config in self.log:
-        metric_dict, info_dict = self.log.get_metric_and_info(config)
-        if info_dict.get('status') != self.__FAILED:
+        metric_dict = self.log.get_metric(config)
+        if metric_dict.get('status') != self.__FAILED:
           continue # skip already executed runs
       
       # if config not in self.log or status==self.__FAILED
@@ -618,8 +622,9 @@ class Experiment:
         raise
       
       # Open log file and add result
-      self.log.add_result(config, metrics=metric_dict,
-                          datetime=str(datetime.now()), status=self.__COMPLETED)
+      self.log.add_result(config, **metric_dict,
+                          datetime=str(datetime.now()), 
+                          status=self.__COMPLETED)
       self.log.to_tsv()
       
       logging.info("Saved experiment data to log")
@@ -659,7 +664,6 @@ class Experiment:
         # empty log
         lgs = ExperimentLog.from_exp_config(configs.__dict__, 
                                             os.path.join(logs_folder, f'split_{n}.tsv',),
-                                            base.info_fields,
                                             base.metric_fields)
         
         # resplitting nth split
@@ -667,8 +671,8 @@ class Experiment:
         cfgs_temp.filter_iter(lambda i, _: i%target_split==n)
         for cfg in track(cfgs_temp, description=f'split: {n}/{target_split}'):
           if cfg in base:
-            metric_dict, info_dict = base.get_metric_and_info(cfg)
-            lgs.add_result(cfg, metric_dict, **info_dict)
+            metric_dict = base.get_metric(cfg)
+            lgs.add_result(cfg, **metric_dict)
           
         lgs.to_tsv()
 
