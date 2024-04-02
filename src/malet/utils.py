@@ -38,4 +38,9 @@ def list2tuple(l):
 
 def str2value(value_str):
     """Casts string back to standard python types"""
-    return literal_eval(value_str) if isinstance(value_str, str) else value_str
+    if not isinstance(value_str, str): return value_str
+    value_str = value_str.replace('inf', '2e+308')
+    try:
+      return literal_eval(value_str)
+    except:
+      return value_str
