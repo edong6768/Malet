@@ -26,10 +26,12 @@ pip install git+https://github.com/edong6768/Malet.git
 ## Dependencies
 
 - absl-py 1.0.0
-- numpy 1.22.0
-- pandas 2.0.3
+- gitpython 3.1.40
 - matplotlib 3.7.0
 - ml-collections 0.1.0
+- numpy 1.22.0
+- pandas 2.0.3
+- rich 13.6.0
 - seaborn 0.11.2
 
 ## Documentation **(🚨 Will be migrated to Sphinx-based Read-the-docs in near future)**
@@ -641,6 +643,9 @@ def get_ckpt(ckpt_dir):
     ...
     return ckpt
 
+def save_ckpt(new_ckpt, ckpt_dir):
+    ...
+
 def train(config, experiment, ...):
 
     ... # set up
@@ -661,7 +666,7 @@ def train(config, experiment, ...):
         'val_losses': [],
     }
     if config in experiment.log:
-      metric_dict = experiment.get_log_checkpoint(config, metric_dict)
+      metric_dict = experiment.get_log_checkpoint(config)[0]
     ###################################################################
     ...
     # training happens here
@@ -671,12 +676,13 @@ def train(config, experiment, ...):
       
       ... # update metric_dict
 
-      if not epoch % config.ckpt_every:
+      if not (epoch+1) % config.ckpt_every:
 
         ... # train state, model checkpoint
 
         ####################### checkpoint log #######################
-        experiment.update_log(metric_dict, configs=config) 
+        save_ckpt(new_ckpt, ckpt_dir)
+        experiment.update_log(config, **metric_dict) 
         ##############################################################
     ...
 

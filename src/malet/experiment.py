@@ -7,6 +7,7 @@ from typing import Optional, ClassVar, Callable, Union, TypeVar
 from dataclasses import dataclass
 from itertools import product, chain
 from datetime import datetime
+from git import Repo
 
 import pandas as pd
 import numpy as np
@@ -502,6 +503,8 @@ class Experiment:
   __FAILED: ClassVar[str] = 'F'
   __COMPLETED: ClassVar[str] = 'C'
   
+  infos: ClassVar[list] = ['datetime', 'duration', 'commit_hash', 'status']
+  
   def __init__(self, 
                exp_folder_path: str,
                exp_function: ExpFunc,
@@ -530,6 +533,7 @@ class Experiment:
     if isinstance(self.exp_bs, int) and self.exp_bs>1 or isinstance(self.exp_bs, str):
       tsv_file = os.path.join(exp_folder_path, 'log_splits', f'split_{self.exp_bi}.tsv') # for saving seperate log for each split in plan slitting mode.
     
+    exp_metrics = self.infos + exp_metrics
     self.log = self.__get_log(tsv_file, exp_metrics, auto_update_tsv)
     
     
@@ -574,18 +578,25 @@ class Experiment:
     fig_dir = os.path.join(exp_folder, 'figure')
     return cfg_file, tsv_file, fig_dir
   
-  def get_log_checkpoint(self, config, empty_metric):
+  def get_log_checkpoint(self, config):
     metric_dict = self.log.get_metric(config)
-    if metric_dict['status'] == self.__FAILED:
-      return metric_dict
-    return empty_metric
+    info_dict = {k:v for k in self.infos if (k in metric_dict and pd.notna(v:=metric_dict.pop(k)))}
+    metric_dict = {k:v for k, v in metric_dict.items() if pd.notna(v)}
+    return metric_dict, info_dict
     
-  def update_log(self, metric_dict, config):
-    self.log.add_result(metric_dict, configs=config, 
-                        datetime=str(datetime.now()), status=self.__RUNNING)
+  def update_log(self, config, **metric_dict):
+    self.log.add_result(config, **metric_dict, 
+                        datetime=str(datetime.now()), 
+                        status=self.__RUNNING)
     self.log.to_tsv()
     
   def run(self):
+    
+    try:
+      commit_hash = Repo.init().head.commit.hexsha
+    except:
+      commit_hash = None
+      logging.info('No git exist in current directory.')
     
     # current experiment count
     if isinstance(self.exp_bs, int):
@@ -597,13 +608,15 @@ class Experiment:
     for i, config in enumerate(self.configs):
 
       if config in self.log:
-        metric_dict = self.log.get_metric(config)
-        if metric_dict.get('status') != self.__FAILED:
+        metric_dict, info_dict = self.get_log_checkpoint(config)
+        if info_dict.get('status') != self.__FAILED:
           continue # skip already executed runs
       
       # if config not in self.log or status==self.__FAILED
       if self.configs_save:
-        self.log.add_result(config, status=self.__RUNNING)
+        if config not in self.log: metric_dict = {}
+        self.log.add_result(config, **metric_dict,
+                            status=self.__RUNNING)
         self.log.to_tsv()
 
       logging.info('###################################')
@@ -611,23 +624,31 @@ class Experiment:
       logging.info('###################################') 
 
 
+      start_t = datetime.now()
       try:
         if self.checkpoint:
           metric_dict = self.exp_func(config, self)
         else:
           metric_dict = self.exp_func(config)
+        status = self.__COMPLETED
+        
       except:
-        self.log.add_result(config, status=self.__FAILED)
-        self.log.to_tsv()
+        metric_dict = self.get_log_checkpoint(config)[0] if config in self.log else {}
+        status = self.__FAILED
         raise
       
-      # Open log file and add result
-      self.log.add_result(config, **metric_dict,
-                          datetime=str(datetime.now()), 
-                          status=self.__COMPLETED)
-      self.log.to_tsv()
+      finally:
+        end_t = datetime.now()
+        prev_duration = datetime.timedelta(info_dict['duration'] if (config in self.log and 'duration' in info_dict) else 0)
+        self.log.add_result(config, **metric_dict,
+                            datetime=end_t, 
+                            duration=prev_duration+(end_t-start_t),
+                            commit_hash=commit_hash,
+                            status=status)
+        self.log.to_tsv()
+        
+        logging.info("Saved experiment data to log")
       
-      logging.info("Saved experiment data to log")
       
       
   @staticmethod
