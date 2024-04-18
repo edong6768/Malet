@@ -7,6 +7,7 @@ from typing import Optional, ClassVar, Callable, Union, TypeVar
 from dataclasses import dataclass
 from itertools import product, chain
 from datetime import datetime
+from datetime import timedelta
 from git import Repo
 
 import pandas as pd
@@ -30,7 +31,6 @@ class ConfigIter:
    model: ResNet32
    dataset: cifar10
    ...
-   grid_fields: [optimizer, pai_type, pai_sparsity, rho, seed]
    grid:
      - optimizer: [sgd]
        group:
@@ -536,6 +536,8 @@ class Experiment:
     exp_metrics = self.infos + exp_metrics
     self.log = self.__get_log(tsv_file, exp_metrics, auto_update_tsv)
     
+    self.__check_matching_static_configs()
+    
     
   def __process_split(self):
     
@@ -570,6 +572,16 @@ class Experiment:
       log.to_tsv()
     return log
   
+  def __check_matching_static_configs(self):
+    iter_statics = self.configs.static_configs
+    log_statics = self.log.static_configs
+    # check matching keys
+    ist, lst = {*iter_statics.keys()}, {*log_statics.keys()}
+    assert not (k:=(ist&lst) - (ist|lst)), f"Found non-matching keys {k} in static config of configiter and experiement log."
+    
+    # check matching values
+    non_match = {k:(v1, v2) for k in ist if (v1:=iter_statics[k])!=(v2:=log_statics[k])}
+    assert not non_match, f"Found non-matching values {non_match} in static config of configiter and experiement log."
   
   @staticmethod
   def get_paths(exp_folder):
@@ -581,7 +593,7 @@ class Experiment:
   def get_log_checkpoint(self, config):
     metric_dict = self.log.get_metric(config)
     info_dict = {k:v for k in self.infos if (k in metric_dict and pd.notna(v:=metric_dict.pop(k)))}
-    metric_dict = {k:v for k, v in metric_dict.items() if pd.notna(v)}
+    metric_dict = {k:v for k, v in metric_dict.items() if not (np.isscalar(v) and pd.isna(v))}
     return metric_dict, info_dict
     
   def update_log(self, config, **metric_dict):
@@ -606,15 +618,16 @@ class Experiment:
     
     # run experiment plans 
     for i, config in enumerate(self.configs):
-
-      if config in self.log:
+      
+      had_checkpoint = config in self.log
+      if had_checkpoint:
         metric_dict, info_dict = self.get_log_checkpoint(config)
         if info_dict.get('status') != self.__FAILED:
           continue # skip already executed runs
       
       # if config not in self.log or status==self.__FAILED
       if self.configs_save:
-        if config not in self.log: metric_dict = {}
+        if not had_checkpoint: metric_dict = {}
         self.log.add_result(config, **metric_dict,
                             status=self.__RUNNING)
         self.log.to_tsv()
@@ -639,7 +652,7 @@ class Experiment:
       
       finally:
         end_t = datetime.now()
-        prev_duration = datetime.timedelta(info_dict['duration'] if (config in self.log and 'duration' in info_dict) else 0)
+        prev_duration = pd.to_timedelta(info_dict.get('duration', '0')) if had_checkpoint else timedelta(0)
         self.log.add_result(config, **metric_dict,
                             datetime=end_t, 
                             duration=prev_duration+(end_t-start_t),
