@@ -236,6 +236,14 @@ def run(argv, preprcs_df):
         fig_size = [*map(float, fig_size)]
         plot_config['ax_style']['fig_size'] = fig_size
     
+    xscale = flag_dict.pop('xscale')
+    if xscale:
+        plot_config['ax_style']['xscale'] = [xscale, {}]
+    
+    yscale = flag_dict.pop('yscale')
+    if yscale:
+        plot_config['ax_style']['yscale'] = [yscale, {}]
+    
     title = flag_dict.pop('title')
     if title:
         plot_config['ax_style']['title'] = [title, {'size': flag_dict['font_size']}]
@@ -286,6 +294,8 @@ def main(preprcs_df = lambda *x: x):
     flags.DEFINE_bool('annotate', True, 'Run multiple plot according to given config.')
     flags.DEFINE_spaceseplist('annotate_field', '', 'List of fields to include in annotation.')
     flags.DEFINE_spaceseplist('fig_size', '', 'Figure size.')
+    flags.DEFINE_string('xscale', 'linear', "Scale of x-axis (linear, log).")
+    flags.DEFINE_string('yscale', 'linear', "Scale of y-axis (linear, log).")
     flags.DEFINE_string('title', '', "Title.")
     flags.DEFINE_string('xlabel', '', "Label of x-axis.")
     flags.DEFINE_string('ylabel', '', "Label of y-axis.")

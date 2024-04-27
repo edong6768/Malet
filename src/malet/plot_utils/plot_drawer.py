@@ -69,7 +69,8 @@ def ax_draw_curve(ax: Axes,
             abv_annot = [*map(abv, annotate_field)]
             for i, (x,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
                 if i%markevery: continue
-                txt = '\n'.join([f'{y:.5f}', str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
+                txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else ''), str(x)]
+                                +[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
@@ -153,7 +154,8 @@ def ax_draw_best_stared_curve(ax: Axes,
             abv_annot = [*map(abv, annotate_field)]
             for i, (x,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
                 if i%markevery: continue
-                txt = '\n'.join([f'{y:.5f}', str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
+                txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else ''), str(x)]
+                                +[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
@@ -196,7 +198,8 @@ def ax_draw_bar(ax: Axes,
                                 [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
         abv_annot = [*map(abv, annotate_field)]
         for x,y,t in zip(x_values, metric_values, tick_values):
-            txt = '\n'.join([f'{y:.5f}']+['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
+            txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else '')]
+                            +['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
             ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
@@ -215,16 +218,17 @@ def ax_draw_heatmap(ax: Axes,
     Draws heatmap of y_field over two arbitrary x_fields setted as multi-index of the dataframe.
     """
     
-    grid_df = df.drop(columns=[list(df)[i] for i in range(1, len(df.columns))])
     y_field = list(df)[0]
+    y_field_df = df.drop(columns=list(df)[1:])
     
-    x_fields = grid_df.index.names
-    *x_values, = map(lambda l: sorted(set(grid_df.index.get_level_values(l))), x_fields)
-    grid_df = grid_df.reset_index()\
-           .pivot(index=x_fields[1], columns=x_fields[0])
-    
+    x_fields = y_field_df.index.names
+    grid_df = (y_field_df
+                .reset_index()
+                .pivot(index=x_fields[1], columns=x_fields[0])
+               )
     ax.pcolor(grid_df, cmap=cmap, edgecolors='w')
     
+    *x_values, = map(lambda l: sorted(set(y_field_df.index.get_level_values(l))), x_fields)
     ax.set_xticks(np.arange(0.5, len(x_values[0]), 1), x_values[0], fontsize=10, rotation=45)
     ax.set_yticks(np.arange(0.5, len(x_values[1]), 1), x_values[1], fontsize=10)
         
@@ -235,9 +239,18 @@ def ax_draw_heatmap(ax: Axes,
                                 [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
         abv_annot = [*map(abv, annotate_field)]
         
+        if f'{y_field}_std' in df:
+            y_std_df = df.drop(columns=list(set(df)-{f'{y_field}_std'}))
+            std_grid_df = (y_std_df
+                            .reset_index()
+                            .pivot(index=x_fields[1], columns=x_fields[0])
+                          )
+            
         for i, (mtc, x) in enumerate([*grid_df]):
             for j, y in enumerate([*grid_df.index.get_level_values(0)]):
-                txt = '\n'.join([f'{grid_df.loc[y, (mtc, x)]:.5f}']+[f'{i}={df.loc[(x, y), j]}' for i, j in zip(abv_annot, annotate_field)])
+                txt = '\n'.join([f'{grid_df.loc[y, (mtc, x)]:.5f}'
+                                 +(f'\n$\pm${std_grid_df.loc[y, (f"{mtc}_std", x)]:.5f}' if (f'{y_field}_std' in df and pd.notna(std_grid_df.loc[y, (f'{mtc}_std', x)])) else '')]
+                                +[f'{i}={df.loc[(x, y), j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
     
     # ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
