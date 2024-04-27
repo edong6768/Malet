@@ -487,6 +487,31 @@ class ExperimentLog:
            str(self.df)
 
 
+class RunInfo:
+  infos: ClassVar[list] = ['datetime', 'duration', 'commit_hash']
+
+  def __init__(self, prev_duration: timedelta=timedelta(0)):
+    self.__datetime = datetime.now()
+    self.__duration = prev_duration
+    
+    try:
+      self.__commit_hash = Repo.init().head.commit.hexsha
+    except:
+      self.__commit_hash = None
+      logging.info('No git exist in current directory.')
+     
+  def get(self):
+    return {
+      'datetime':     self.__datetime,
+      'duration':     self.__duration,
+      'commit_hash':  self.__commit_hash
+    }
+  
+  def update_and_get(self):
+    curr_t = datetime.now()
+    self.__duration += curr_t - self.__datetime
+    self.__datetime = curr_t 
+    return self.get()
 
 
 class Experiment:
@@ -503,7 +528,7 @@ class Experiment:
   __FAILED: ClassVar[str] = 'F'
   __COMPLETED: ClassVar[str] = 'C'
   
-  infos: ClassVar[list] = ['datetime', 'duration', 'commit_hash', 'status']
+  infos: ClassVar[list] = [*RunInfo.infos, 'status']
   
   def __init__(self, 
                exp_folder_path: str,
@@ -521,48 +546,48 @@ class Experiment:
     
     self.exp_func = exp_function
 
-    self.exp_bs = total_splits
-    self.exp_bi = curr_split
     self.configs_save = configs_save
     self.checkpoint = checkpoint
     
-    cfg_file, tsv_file, _ = self.get_paths(exp_folder_path)
-    self.configs = ConfigIter(cfg_file)
-    self.__process_split()
-
-    if isinstance(self.exp_bs, int) and self.exp_bs>1 or isinstance(self.exp_bs, str):
-      tsv_file = os.path.join(exp_folder_path, 'log_splits', f'split_{self.exp_bi}.tsv') # for saving seperate log for each split in plan slitting mode.
+    do_split = isinstance(total_splits, int) and total_splits>1 or isinstance(total_splits, str)
+    cfg_file, tsv_file, _ = self.get_paths(exp_folder_path, split=curr_split if do_split else None)
     
-    exp_metrics = self.infos + exp_metrics
-    self.log = self.__get_log(tsv_file, exp_metrics, auto_update_tsv)
+    self.configs = self.__get_and_split_configs(cfg_file, total_splits, curr_split)
+    self.log = self.__get_log(tsv_file, self.infos+exp_metrics, auto_update_tsv)
     
     self.__check_matching_static_configs()
     
+  @staticmethod
+  def __get_and_split_configs(cfg_file, exp_bs, exp_bi):
     
-  def __process_split(self):
+    configiter = ConfigIter(cfg_file)
     
-    assert self.exp_bs.isdigit() or (self.exp_bs in self.configs.grid_fields), \
-        f'Enter valid splits (int | Literal{self.configs.grid_fields}).'
+    assert exp_bs.isdigit() or (exp_bs in configiter.grid_fields), f'Enter valid splits (int | Literal{configiter.grid_fields}).'
+    
     # if total exp split is given as integer : uniformly split
-    if self.exp_bs.isdigit():
-      self.exp_bs, self.exp_bi = map(int, [self.exp_bs, self.exp_bi])
-      assert self.exp_bs > 0, 'Total number of experiment splits should be larger than 0'
-      assert self.exp_bs > self.exp_bi, 'Experiment split index should be smaller than the total number of experiment splits'
-      if self.exp_bs>1:
-        self.configs.filter_iter(lambda i, _: i%self.exp_bs==self.exp_bi)
-        
+    if exp_bs.isdigit():
+      exp_bs, exp_bi = map(int, [exp_bs, exp_bi])
+      assert exp_bs > 0, 'Total number of experiment splits should be larger than 0'
+      assert exp_bs > exp_bi, 'Experiment split index should be smaller than the total number of experiment splits'
+      if exp_bs>1:
+        configiter.filter_iter(lambda i, _: i%exp_bs==exp_bi)
+      
+      logging.info(f'Experiment : {configiter.name} (split : {exp_bi+1}/{exp_bs})')
+      
     # else split across certain study field
-    elif self.exp_bs in self.configs.grid_fields:
+    elif exp_bs in configiter.grid_fields:
+      exp_bi = [*map(str2value, exp_bi.split())]
+      configiter.filter_iter(lambda _, d: d[exp_bs] in exp_bi)
       
-      self.exp_bi = [*map(str2value, self.exp_bi.split())]
-      self.configs.filter_iter(lambda _, d: d[self.exp_bs] in self.exp_bi)
-      
-      
+      logging.info(f'Experiment : {configiter.name} (split : {exp_bi}/{configiter.grid_dict[exp_bs]})')
+    
+    return configiter
       
   def __get_log(self, logs_file, metric_fields=None, auto_update_tsv=False):
     # Configure experiment log
     if os.path.exists(logs_file): # Check if there already is a file
       log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv) # resumes automatically
+      
     else: # Create new log
       logs_path, _ = os.path.split(logs_file)
       if not os.path.exists(logs_path):
@@ -570,74 +595,75 @@ class Experiment:
       log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file,
                                           metric_fields=metric_fields, auto_update_tsv=auto_update_tsv)
       log.to_tsv()
+      
     return log
+  
   
   def __check_matching_static_configs(self):
     iter_statics = self.configs.static_configs
     log_statics = self.log.static_configs
     # check matching keys
     ist, lst = {*iter_statics.keys()}, {*log_statics.keys()}
-    assert not (k:=(ist&lst) - (ist|lst)), f"Found non-matching keys {k} in static config of configiter and experiement log."
+    assert not (k:=ist^lst), f"Found non-matching keys {k} in static config of configiter and experiement log."
     
     # check matching values
     non_match = {k:(v1, v2) for k in ist if (v1:=iter_statics[k])!=(v2:=log_statics[k])}
     assert not non_match, f"Found non-matching values {non_match} in static config of configiter and experiement log."
   
+  
   @staticmethod
-  def get_paths(exp_folder):
+  def get_paths(exp_folder, split=None):
     cfg_file = os.path.join(exp_folder, 'exp_config.yaml')
-    tsv_file = os.path.join(exp_folder, 'log.tsv')
+    
+    if split==None:
+      tsv_file = os.path.join(exp_folder, 'log.tsv')
+    else:
+      tsv_file = os.path.join(exp_folder, 'log_splits', f'split_{split}.tsv')
+      
     fig_dir = os.path.join(exp_folder, 'figure')
     return cfg_file, tsv_file, fig_dir
   
-  def get_log_checkpoint(self, config):
+  
+  def get_metric_info(self, config):
+    if config not in self.log: 
+      logging.info("Log of matching config is not found. Returning empty dictionaries.")
+      return {}, {} # return empty dictionaries if no log is found
+    
     metric_dict = self.log.get_metric(config)
     info_dict = {k:v for k in self.infos if (k in metric_dict and pd.notna(v:=metric_dict.pop(k)))}
     metric_dict = {k:v for k, v in metric_dict.items() if not (np.isscalar(v) and pd.isna(v))}
     return metric_dict, info_dict
+  
     
-  def update_log(self, config, **metric_dict):
-    self.log.add_result(config, **metric_dict, 
-                        datetime=str(datetime.now()), 
-                        status=self.__RUNNING)
+  def update_log(self, config, status=None, **metric_dict):
+    if status==None: 
+      status = self.__RUNNING
+    self.log.add_result(config, **metric_dict,
+                        **self.__curr_runinfo.update_and_get(),
+                        status=status)
     self.log.to_tsv()
     
+    
   def run(self):
-    
-    try:
-      commit_hash = Repo.init().head.commit.hexsha
-    except:
-      commit_hash = None
-      logging.info('No git exist in current directory.')
-    
-    # current experiment count
-    if isinstance(self.exp_bs, int):
-      logging.info(f'Experiment : {self.configs.name} (split : {self.exp_bi+1}/{self.exp_bs})')
-    elif isinstance(self.exp_bs, str):
-      logging.info(f'Experiment : {self.configs.name} (split : {self.exp_bi}/{self.configs.grid_dict[self.exp_bs]})')
-    
     # run experiment plans 
     for i, config in enumerate(self.configs):
       
-      had_checkpoint = config in self.log
-      if had_checkpoint:
-        metric_dict, info_dict = self.get_log_checkpoint(config)
-        if info_dict.get('status') != self.__FAILED:
-          continue # skip already executed runs
+      metric_dict, info_dict = self.get_metric_info(config)
+      
+      # skip already executed runs
+      if info_dict.get('status') in {self.__FAILED, self.__COMPLETED}: continue
+      
+      self.__curr_runinfo = RunInfo(prev_duration=pd.to_timedelta(info_dict.get('duration', '0')))
       
       # if config not in self.log or status==self.__FAILED
       if self.configs_save:
-        if not had_checkpoint: metric_dict = {}
-        self.log.add_result(config, **metric_dict,
-                            status=self.__RUNNING)
-        self.log.to_tsv()
+        self.update_log(config, **metric_dict, status=self.__RUNNING)
 
       logging.info('###################################')
       logging.info(f'   Experiment count : {i+1}/{len(self.configs)}')
       logging.info('###################################') 
 
 
-      start_t = datetime.now()
       try:
         if self.checkpoint:
           metric_dict = self.exp_func(config, self)
@@ -646,20 +672,12 @@ class Experiment:
         status = self.__COMPLETED
         
       except:
-        metric_dict = self.get_log_checkpoint(config)[0] if config in self.log else {}
+        metric_dict, _ = self.get_metric_info(config)
         status = self.__FAILED
         raise
       
       finally:
-        end_t = datetime.now()
-        prev_duration = pd.to_timedelta(info_dict.get('duration', '0')) if had_checkpoint else timedelta(0)
-        self.log.add_result(config, **metric_dict,
-                            datetime=end_t, 
-                            duration=prev_duration+(end_t-start_t),
-                            commit_hash=commit_hash,
-                            status=status)
-        self.log.to_tsv()
-        
+        self.update_log(config, **metric_dict, status=status)
         logging.info("Saved experiment data to log")
       
       
@@ -679,7 +697,7 @@ class Experiment:
       base.merge(*logs)
       shutil.rmtree(logs_folder)
     elif os.path.exists(logs_file): # if only single log file exists 
-      base = ExperimentLog.from_tsv(os.path.join(logs_file), parse_str=False)
+      base = ExperimentLog.from_tsv(logs_file, parse_str=False)
       shutil.rmtree(logs_file)
     
     # save backup
@@ -696,7 +714,7 @@ class Experiment:
       
       for n in range(target_split):
         # empty log
-        lgs = ExperimentLog.from_exp_config(configs.__dict__, 
+        logs = ExperimentLog.from_exp_config(configs.__dict__, 
                                             os.path.join(logs_folder, f'split_{n}.tsv',),
                                             base.metric_fields)
         
@@ -706,7 +724,24 @@ class Experiment:
         for cfg in track(cfgs_temp, description=f'split: {n}/{target_split}'):
           if cfg in base:
             metric_dict = base.get_metric(cfg)
-            lgs.add_result(cfg, **metric_dict)
+            logs.add_result(cfg, **metric_dict)
           
-        lgs.to_tsv()
+        logs.to_tsv()
+        
+        
+  @classmethod 
+  def set_log_status_as_failed(cls, exp_folder_path: str):
+    _, logs_file, _ = Experiment.get_paths(exp_folder_path)
+    logs_folder = os.path.join(exp_folder_path, 'log_splits')
+    
+    # merge original log_splits
+    if os.path.exists(logs_folder): # if log is splitted
+      os.chdir(logs_folder)
+      paths = [os.path.join(logs_folder, sp_n) for sp_n in glob.glob("*.tsv")]
+    elif os.path.exists(logs_file): # if only single log file exists 
+      paths = [logs_file]
 
+    for p in paths:
+      log = ExperimentLog.from_tsv(p, parse_str=False)
+      log.df['status'] = log.df['status'].map(lambda x: cls.__FAILED if x==cls.__RUNNING else x)
+      log.to_tsv()
