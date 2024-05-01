@@ -651,7 +651,7 @@ class Experiment:
       metric_dict, info_dict = self.get_metric_info(config)
       
       # skip already executed runs
-      if info_dict.get('status') in {self.__FAILED, self.__COMPLETED}: continue
+      if info_dict.get('status') in {self.__RUNNING, self.__COMPLETED}: continue
       
       self.__curr_runinfo = RunInfo(prev_duration=pd.to_timedelta(info_dict.get('duration', '0')))
       
