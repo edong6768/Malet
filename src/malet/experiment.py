@@ -54,6 +54,8 @@ class ConfigIter:
     self.name = os.path.split(exp_config_path)[0].split('/')[-1]
     self.grid = self.raw_config.get('grid')
     self.static_configs = {k:self.raw_config[k] for k in set(self.raw_config)-{'grid_fields', 'grid'}}
+    
+    assert not (f:={k for k in self.static_configs.keys() if k in self.grid_fields}), f'Overlapping fields {f} in Static configs and grid fields.'
   
     self.grid_iter = self.__get_iter()
     
