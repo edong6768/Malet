@@ -109,19 +109,24 @@ class ConfigIter:
     return dupless_names
     
   @staticmethod
-  def __ravel_group(study):
-    # Return list of study if there is no 'group'
-    if 'group' not in study: return [study]
+  def __ravel_group(grid):
+    # Return list of grid if there is no 'group'
+    if 'group' not in grid: return [grid]
+    group = grid['group']
     
     # Ravel grouped fields into list of experiment plans.
-    grid_g = lambda g: ([*zip(g.keys(), value)] for value in zip(*g.values()))
-    if type(study['group'])==dict:
-      r_groups = grid_g(study['group'])
-    elif type(study['group'])==list:
-      r_groups = (chain(*gs) for gs in product(*map(grid_g, study['group'])))
-    study.pop('group')
+    def grid_g(g):
+      g_len = [*map(len, g.items())]
+      assert all([l==g_len[0] for l in g_len]), f'Grouped fields should have same length, got fields with length {dict(zip(g.keys(), g_len))}'
+      return ([*zip(g.keys(), value)] for value in zip(*g.values()))
     
-    raveled_study = ({**study, **dict(g)} for g in r_groups)
+    if isinstance(group, dict):
+      r_groups = grid_g(group)
+    elif isinstance(group, list):
+      r_groups = (chain(*gs) for gs in product(*map(grid_g, group)))
+    grid.pop('group')
+    
+    raveled_study = ({**grid, **dict(g)} for g in r_groups)
     return raveled_study
 
   def __get_iter(self):
