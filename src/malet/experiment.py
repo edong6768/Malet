@@ -564,11 +564,10 @@ class Experiment:
     
     configiter = ConfigIter(cfg_file)
     
-    assert exp_bs.isdigit() or (exp_bs in configiter.grid_fields), f'Enter valid splits (int | Literal{configiter.grid_fields}).'
+    assert isinstance(exp_bs, int) or (exp_bs in configiter.grid_fields), f'Enter valid splits (int | Literal{configiter.grid_fields}).'
     
     # if total exp split is given as integer : uniformly split
-    if exp_bs.isdigit():
-      exp_bs, exp_bi = map(int, [exp_bs, exp_bi])
+    if isinstance(exp_bs, int):
       assert exp_bs > 0, 'Total number of experiment splits should be larger than 0'
       assert exp_bs > exp_bi, 'Experiment split index should be smaller than the total number of experiment splits'
       if exp_bs>1:
