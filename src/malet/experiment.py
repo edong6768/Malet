@@ -54,6 +54,8 @@ class ConfigIter:
     self.name = os.path.split(exp_config_path)[0].split('/')[-1]
     self.grid = self.raw_config.get('grid')
     self.static_configs = {k:self.raw_config[k] for k in set(self.raw_config)-{'grid_fields', 'grid'}}
+    
+    assert not (f:={k for k in self.static_configs.keys() if k in self.grid_fields}), f'Overlapping fields {f} in Static configs and grid fields.'
   
     self.grid_iter = self.__get_iter()
     
@@ -107,19 +109,24 @@ class ConfigIter:
     return dupless_names
     
   @staticmethod
-  def __ravel_group(study):
-    # Return list of study if there is no 'group'
-    if 'group' not in study: return [study]
+  def __ravel_group(grid):
+    # Return list of grid if there is no 'group'
+    if 'group' not in grid: return [grid]
+    group = grid['group']
     
     # Ravel grouped fields into list of experiment plans.
-    grid_g = lambda g: ([*zip(g.keys(), value)] for value in zip(*g.values()))
-    if type(study['group'])==dict:
-      r_groups = grid_g(study['group'])
-    elif type(study['group'])==list:
-      r_groups = (chain(*gs) for gs in product(*map(grid_g, study['group'])))
-    study.pop('group')
+    def grid_g(g):
+      g_len = [*map(len, g.items())]
+      assert all([l==g_len[0] for l in g_len]), f'Grouped fields should have same length, got fields with length {dict(zip(g.keys(), g_len))}'
+      return ([*zip(g.keys(), value)] for value in zip(*g.values()))
     
-    raveled_study = ({**study, **dict(g)} for g in r_groups)
+    if isinstance(group, dict):
+      r_groups = grid_g(group)
+    elif isinstance(group, list):
+      r_groups = (chain(*gs) for gs in product(*map(grid_g, group)))
+    grid.pop('group')
+    
+    raveled_study = ({**grid, **dict(g)} for g in r_groups)
     return raveled_study
 
   def __get_iter(self):
@@ -562,11 +569,10 @@ class Experiment:
     
     configiter = ConfigIter(cfg_file)
     
-    assert exp_bs.isdigit() or (exp_bs in configiter.grid_fields), f'Enter valid splits (int | Literal{configiter.grid_fields}).'
+    assert isinstance(exp_bs, int) or (exp_bs in configiter.grid_fields), f'Enter valid splits (int | Literal{configiter.grid_fields}).'
     
     # if total exp split is given as integer : uniformly split
-    if exp_bs.isdigit():
-      exp_bs, exp_bi = map(int, [exp_bs, exp_bi])
+    if isinstance(exp_bs, int):
       assert exp_bs > 0, 'Total number of experiment splits should be larger than 0'
       assert exp_bs > exp_bi, 'Experiment split index should be smaller than the total number of experiment splits'
       if exp_bs>1:

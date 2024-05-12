@@ -1,7 +1,7 @@
 
 import pandas as pd
 
-def select_df(df, filt_dict, *exclude_fields, drop=False):
+def select_df(df, filt_dict, *exclude_fields, equal=True, drop=False):
     """Select df rows with matching from given filt_dict except ``exclude_fields``"""
     assert not df.empty, 'Given dataframe is empty.'
     assert not (k:=set(filt_dict.keys()) - set(df.index.names)), f'filt_dict keys {k} is not in df.'
@@ -13,7 +13,8 @@ def select_df(df, filt_dict, *exclude_fields, drop=False):
     for i, k in enumerate(filt_keys):
         values = nest(filt_dict[k])
         assert not (v:=set(values)-(vs:=set(df.index.get_level_values(k)))), f"Values {v} are not in field '{k}': {sorted(vs)}"
-        df = df.loc[df.index.get_level_values(k).isin(values)]
+        fltr = df.index.get_level_values(k).isin(values)
+        df = df.loc[fltr if equal else ~fltr]
         assert not df.empty, f"Filter {k}:{values} return empty dataframe. Inspect {dict((k, filt_dict[k]) for k in filt_keys[:i+1])}" 
     
     if drop:

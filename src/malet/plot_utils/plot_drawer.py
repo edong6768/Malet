@@ -53,6 +53,10 @@ def ax_draw_curve(ax: Axes,
             
         ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
                 marker=marker, markersize=markersize, markevery=markevery)
+        
+        if len(x_values)%markevery!=0:
+            ax.plot(tick_values[-1], metric_values[-1], color=color, marker=marker, markersize=markersize)
+        
         if f'{y_field}_std' in df:
             x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
             
@@ -68,7 +72,7 @@ def ax_draw_curve(ax: Axes,
                                       [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
             abv_annot = [*map(abv, annotate_field)]
             for i, (x,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
-                if i%markevery: continue
+                if i%markevery and i!=len(x_values)-1: continue
                 txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else ''), str(x)]
                                 +[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
                 ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
@@ -136,11 +140,9 @@ def ax_draw_best_stared_curve(ax: Axes,
         best_idx = list(metric_values).index((max if best_at_max else min)(metric_values))
         for i, (_,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
             if i%markevery: continue
-            if i==0:
-                ax.plot(tick_values[i], metric_values[i], label=label, color=color, linewidth=linewidth,
-                        marker=marker, markersize=markersize, markevery=markevery)
-            elif i==best_idx:
-                ax.plot(tick_values[i], metric_values[i], color='green', marker='*', markersize=markersize+10)
+            if i==best_idx:
+                ax.plot(tick_values[i], metric_values[i], color='green', 
+                        marker='*', markersize=markersize+10)
             else:
                 ax.plot(tick_values[i], metric_values[i], color=color, 
                         marker=marker, markersize=markersize, markevery=markevery)
