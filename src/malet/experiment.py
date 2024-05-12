@@ -116,7 +116,7 @@ class ConfigIter:
     
     # Ravel grouped fields into list of experiment plans.
     def grid_g(g):
-      g_len = [*map(len, g.items())]
+      g_len = [*map(len, g.values())]
       assert all([l==g_len[0] for l in g_len]), f'Grouped fields should have same length, got fields with length {dict(zip(g.keys(), g_len))}'
       return ([*zip(g.keys(), value)] for value in zip(*g.values()))
     
