@@ -95,7 +95,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         assert not df.empty, f'Metric {metric}' +\
             (f' and best_ref_metric_field {pcfg["best_ref_metric_field"]} are' if pcfg["best_ref_metric_field"] else ' is') +\
-                ' NaN in given dataframe.'
+                f' NaN in given dataframe: \n{log.df}'
         
         #---filter df according to FLAGS.filter step and metrics
         if pflt:
@@ -125,7 +125,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 st = [i for i in filt_dict if 'step' in i][0][1]
                 pcfg['best_ref_x_fields'][i] = int(st.split(':')[1])-1 if ':' in st else int(st) # CNG 'a:b' step filter later
             else:
-                pcfg['best_ref_x_fields'][i]=min(*df.index.get_level_values('total_steps'))-1
+                pcfg['best_ref_x_fields'][i]=min(*df.index.get_level_values('total_steps'))
                 
         # build save name
         save_name = __save_name_builder(pflt, pmlf, pcfg, save_name=save_name)
@@ -296,8 +296,8 @@ def main(preprcs_df = lambda *x: x):
     flags.DEFINE_bool('annotate', True, 'Run multiple plot according to given config.')
     flags.DEFINE_spaceseplist('annotate_field', '', 'List of fields to include in annotation.')
     flags.DEFINE_spaceseplist('fig_size', '', 'Figure size.')
-    flags.DEFINE_string('xscale', 'linear', "Scale of x-axis (linear, log).")
-    flags.DEFINE_string('yscale', 'linear', "Scale of y-axis (linear, log).")
+    flags.DEFINE_string('xscale', '', "Scale of x-axis (linear, log).")
+    flags.DEFINE_string('yscale', '', "Scale of y-axis (linear, log).")
     flags.DEFINE_string('title', '', "Title.")
     flags.DEFINE_string('xlabel', '', "Label of x-axis.")
     flags.DEFINE_string('ylabel', '', "Label of y-axis.")
