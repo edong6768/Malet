@@ -214,7 +214,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                          best_at_max=best_at_max,
                          **pcfg['line_style'])
         
-        return fig, ax, y_label, save_name.strip('-')
+        return best_df, fig, ax, y_label, save_name.strip('-')
     
 
 def run(argv, preprcs_df):
@@ -267,11 +267,12 @@ def run(argv, preprcs_df):
     save_dir = os.path.join(fig_dir, plot_config['mode'])
     
     if plot_config['mode'].split('-')[0] in {'curve', 'curve_best', 'bar', 'heatmap'}:
-        fig, ax, y_label, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
+        df, fig, ax, y_label, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
         ax.set_ylabel(y_label)
     else:
         assert False, f'Mode: {plot_config["mode"]} does not exist.'
     
+    df.to_csv(os.path.join(save_dir, f'{save_name}.tsv'), sep='\t')
     ax_styler(ax, **plot_config['ax_style'])
     save_figure(fig, save_dir, save_name)
     
