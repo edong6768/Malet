@@ -272,9 +272,9 @@ def run(argv, preprcs_df):
     else:
         assert False, f'Mode: {plot_config["mode"]} does not exist.'
     
-    df.to_csv(os.path.join(save_dir, f'{save_name}.tsv'), sep='\t')
     ax_styler(ax, **plot_config['ax_style'])
     save_figure(fig, save_dir, save_name)
+    df.to_csv(os.path.join(save_dir, f'{save_name}.tsv'), sep='\t')
     
     print('\n', Align(Panel(f'save {{plot, table}} at: {fig_dir}/[bold blue_violet]{plot_config["mode"]}[/bold blue_violet]/[bold spring_green1]{save_name}[/bold spring_green1].{{pdf, tsv}}', 
                       title='Plot complete', padding=(1, 3), expand=False), align='center'), '\n')
