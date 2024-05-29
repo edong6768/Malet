@@ -52,7 +52,7 @@ class ConfigIter:
       self.raw_config = yaml.safe_load(cnfg_str)
     
     self.name = os.path.split(exp_config_path)[0].split('/')[-1]
-    self.grid = self.raw_config.get('grid')
+    self.grid = self.raw_config.get('grid', {})
     self.static_configs = {k:self.raw_config[k] for k in set(self.raw_config)-{'grid_fields', 'grid'}}
     
     assert not (f:={k for k in self.static_configs.keys() if k in self.grid_fields}), f'Overlapping fields {f} in Static configs and grid fields.'
@@ -98,6 +98,8 @@ class ConfigIter:
   @staticmethod
   def __extract_grid_order(cfg_str):
     """parse grid order from raw config string"""
+    if 'grid' not in cfg_str: return []
+    
     grid = re.split('grid ?:', cfg_str)[1]
     names = re.findall('[\w_]+(?= ?:)', grid)
     
@@ -171,6 +173,12 @@ class ExperimentLog:
   __sep: ClassVar[str] = '-'*45 + '\n'
   
   def __post_init__(self):
+    # Only a temporary measure for empty grid_fields
+    if not self.grid_fields:
+      og_set_index = pd.DataFrame.set_index
+      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
+      pd.DataFrame.reset_index = lambda self, *__, **_: self
+      
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
       assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
