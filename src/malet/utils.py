@@ -44,3 +44,15 @@ def str2value(value_str):
       return literal_eval(value_str)
     except:
       return value_str
+
+
+def append_metrics(metric_log=None, **new_metrics):
+    '''Add new metrics to metric_log'''
+    if metric_log==None:
+        metric_log = {}
+    for k, v in new_metrics.items():
+        assert type(v) in {int, float, bool, str}
+        metric_log[k] = metric_log.get(k, [])
+        metric_log[k].append(v)
+    return metric_log
+    
