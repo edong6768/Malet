@@ -179,6 +179,9 @@ class ExperimentLog:
       pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
       pd.DataFrame.reset_index = lambda self, *__, **_: self
       
+      og_drop = pd.DataFrame.drop
+      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=self.metric_fields) if axis==0 else og_drop(slf, *_, axis=axis, **__)
+      
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
       assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
@@ -221,25 +224,35 @@ class ExperimentLog:
 
       # get dataframe from csv body
       csv_str = fd.read()
+    
+    csv_col, csv_idx, *csv_body = csv_str.split('\n')
+    col = csv_col.strip().split('\t')
+    idx = csv_idx.strip().split('\t')
+    csv_head = '\t'.join(idx+col)
+    csv_str = '\n'.join([csv_head, *csv_body])
+
+
+    # Only a temporary measure for empty grid_fields
+    if len(idx)==1:
+      og_set_index = pd.DataFrame.set_index
+      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
+      pd.DataFrame.reset_index = lambda self, *__, **_: self
       
-      csv_col, csv_idx, *csv_body = csv_str.split('\n')
-      col = csv_col.strip().split('\t')
-      idx = csv_idx.strip().split('\t')
-      csv_head = '\t'.join(idx+col)
-      csv_str = '\n'.join([csv_head, *csv_body])
-      
-      df = pd.read_csv(io.StringIO(csv_str), sep='\t')
-      df = df.drop(['id'], axis=1)
-      
-      if parse_str:
-          df = df.applymap(str2value)
-      
-      # set grid_fields to multiindex
-      df = df.set_index(idx[1:])
+      og_drop = pd.DataFrame.drop
+      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=col) if axis==0 else og_drop(slf, *_, axis=axis, **__)
+    
+    df = pd.read_csv(io.StringIO(csv_str), sep='\t')
+    df = df.drop(['id'], axis=1)
+    
+    if parse_str:
+        df = df.applymap(str2value)
+    
+    # set grid_fields to multiindex
+    df = df.set_index(idx[1:])
       
     return {'static_configs': static_configs,
             'grid_fields': idx[1:],
-            'metric_fields': list(df),
+            'metric_fields': col,
             'df': df}
   
 
@@ -423,6 +436,8 @@ class ExperimentLog:
   # -----------------------------------------------------------------------------
 
   def __cfg_match_row(self, config):
+    if not self.grid_fields: return self.df
+    
     grid_filt = reduce(lambda l, r: l & r, 
                        (self.df.index.get_level_values(k)==(str(config[k]) if isinstance(config[k], list) else config[k]) 
                         for k in self.grid_fields))
@@ -659,6 +674,8 @@ class Experiment:
     
     
   def run(self):
+    logging.info('Start running experiments.')
+    
     # run experiment plans 
     for i, config in enumerate(self.configs):
       
@@ -688,12 +705,14 @@ class Experiment:
       except:
         metric_dict, _ = self.get_metric_info(config)
         status = self.__FAILED
+        logging.fatal("Experiment failure occured.")  
         raise
       
       finally:
         self.update_log(config, **metric_dict, status=status)
         logging.info("Saved experiment data to log")
       
+    logging.info('Complete experiments.')
       
       
   @staticmethod
