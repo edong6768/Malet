@@ -162,6 +162,9 @@ class ConfigIter:
 pd.DataFrame.old_set_index = pd.DataFrame.set_index
 pd.DataFrame.old_reset_index = pd.DataFrame.reset_index
 pd.DataFrame.old_drop = pd.DataFrame.drop
+pd.DataFrame.set_index = lambda self, idx, *__, **_: self if not idx else self.old_set_index(idx, *__, **_)
+pd.DataFrame.reset_index = lambda self, *__, **_: self if not self.index.names else self.old_reset_index(*__, **_)
+pd.DataFrame.drop = lambda self, *_, axis=0, **__: pd.DataFrame(columns=self.columns) if len(self)<2 and axis==0 else self.old_drop(*_, axis=axis, **__)
 
 @dataclass
 class ExperimentLog:
@@ -176,29 +179,12 @@ class ExperimentLog:
   __sep: ClassVar[str] = '-'*45 + '\n'
   
   def __post_init__(self):
-
-    # Only a temporary measure for empty grid_fields
-    self.__check_grid_change_df(self.grid_fields, self.metric_fields)
-     
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
       assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
       self.df = pd.DataFrame(columns=self.grid_fields+self.metric_fields).set_index(self.grid_fields)
     else:
       self.metric_fields = list(self.df)
- 
-  @staticmethod
-  def __check_grid_change_df(grid_fields, metric_fields):
-    # Only a temporary measure for empty grid_fields
-    if not grid_fields:
-      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else self.old_set_index(idx, *args, **kwargs)
-      pd.DataFrame.reset_index = lambda self, *__, **_: self
-      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=metric_fields) if axis==0 else slf.old_drop(*_, axis=axis, **__)
-    
-    else:
-      pd.DataFrame.set_index = pd.DataFrame.old_set_index
-      pd.DataFrame.reset_index = pd.DataFrame.old_reset_index
-      pd.DataFrame.drop = pd.DataFrame.old_drop 
      
   # Constructors.
   # -----------------------------------------------------------------------------  
@@ -241,17 +227,13 @@ class ExperimentLog:
     idx = csv_idx.strip().split('\t')
     csv_head = '\t'.join(idx+col)
     csv_str = '\n'.join([csv_head, *csv_body])
-
-
-    # Only a temporary measure for empty grid_fields
-    cls.__check_grid_change_df(idx[1:], col)
     
     df = pd.read_csv(io.StringIO(csv_str), sep='\t')
     df = df.drop(['id'], axis=1)
     
     if parse_str:
         df = df.applymap(str2value)
-    
+        
     # set grid_fields to multiindex
     df = df.set_index(idx[1:])
       
@@ -414,9 +396,6 @@ class ExperimentLog:
     self.df, other.df = (obj.df.reset_index() for obj in (self, other))
     self.df = pd.concat([self.df, other.df]) \
                 .set_index(self.grid_fields)[self.metric_fields]
-
-    # Only a temporary measure for empty grid_fields
-    self.__check_grid_change_df(self.grid_fields, self.metric_fields)
     
     return self
 
