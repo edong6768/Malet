@@ -9,18 +9,23 @@ from itertools import product, chain
 from datetime import datetime
 from datetime import timedelta
 from git import Repo
+from filelock import FileLock
 
 import pandas as pd
 import numpy as np
 from rich.progress import track
 
 from absl import logging
+import logging as plogging
 from ml_collections.config_dict import ConfigDict
 
 from .utils import list2tuple, str2value
 
 Self = TypeVar("Self", bound="Experiment")
 ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, Self], dict]]
+
+plogging.getLogger("filelock")
+plogging.basicConfig(level=plogging.DEBUG)
 
 class ConfigIter:
   '''
@@ -173,21 +178,26 @@ class ExperimentLog:
   __sep: ClassVar[str] = '-'*45 + '\n'
   
   def __post_init__(self):
-    # Only a temporary measure for empty grid_fields
-    if not self.grid_fields:
-      og_set_index = pd.DataFrame.set_index
-      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
-      pd.DataFrame.reset_index = lambda self, *__, **_: self
-      
-      og_drop = pd.DataFrame.drop
-      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=self.metric_fields) if axis==0 else og_drop(slf, *_, axis=axis, **__)
       
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
       assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
+
+      # Only a temporary measure for empty grid_fields
+      if not self.grid_fields:
+        og_set_index = pd.DataFrame.set_index
+        pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
+        pd.DataFrame.reset_index = lambda self, *__, **_: self
+        
+        og_drop = pd.DataFrame.drop
+        pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=self.metric_fields) if axis==0 else og_drop(slf, *_, axis=axis, **__)
+
       self.df = pd.DataFrame(columns=self.grid_fields+self.metric_fields).set_index(self.grid_fields)
+
     else:
       self.metric_fields = list(self.df)
+    
+    self.filelock = FileLock(self.logs_file+'.lock', timeout=3*60*60)
   
   # Constructors.
   # -----------------------------------------------------------------------------  
@@ -199,7 +209,13 @@ class ExperimentLog:
   @classmethod
   def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=False):
     '''open tsv with yaml header'''
-    return cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+    lock = FileLock(logs_file+'.lock', timeout=3*60*60)
+    lock.acquire()
+    try:
+      log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+    finally:
+      lock.release()
+    return log
   
   
   # tsv handlers.
@@ -219,18 +235,17 @@ class ExperimentLog:
           header += s
         return header
     
-      # get workload data from yaml header
-      static_configs = yaml.safe_load(header())
-
-      # get dataframe from csv body
-      csv_str = fd.read()
+      static_configs = yaml.safe_load(header())   # get static configs from yaml header
+      tsv_str = fd.read()                         # get dataframe from tsv body
     
-    csv_col, csv_idx, *csv_body = csv_str.split('\n')
-    col = csv_col.strip().split('\t')
-    idx = csv_idx.strip().split('\t')
-    csv_head = '\t'.join(idx+col)
-    csv_str = '\n'.join([csv_head, *csv_body])
-
+    logging.info('Log file read complete.')
+    
+    # tsv string to pandas dataframe
+    tsv_col, tsv_idx, *tsv_body = tsv_str.split('\n')
+    col = tsv_col.strip().split('\t')
+    idx = tsv_idx.strip().split('\t')
+    tsv_head = '\t'.join(idx+col)
+    tsv_str = '\n'.join([tsv_head, *tsv_body])
 
     # Only a temporary measure for empty grid_fields
     if len(idx)==1:
@@ -239,9 +254,9 @@ class ExperimentLog:
       pd.DataFrame.reset_index = lambda self, *__, **_: self
       
       og_drop = pd.DataFrame.drop
-      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=col) if axis==0 else og_drop(slf, *_, axis=axis, **__)
-    
-    df = pd.read_csv(io.StringIO(csv_str), sep='\t')
+      pd.DataFrame.drop = lambda slf, *__, axis=0, **_: pd.DataFrame(columns=col) if axis==0 else og_drop(slf, *__, axis=axis, **_)
+
+    df = pd.read_csv(io.StringIO(tsv_str), sep='\t')
     df = df.drop(['id'], axis=1)
     
     if parse_str:
@@ -255,54 +270,66 @@ class ExperimentLog:
             'metric_fields': col,
             'df': df}
   
-
-  def load_tsv(self, logs_file, parse_str=True):
+  
+  def lock_file(func):
+    '''Decorator for filelock acquire/release before/after given function call'''
+    def wrapped(self, *args, **kwargs):
+      logging.info('Waiting to acquire tsv...')
+      self.filelock.acquire()
+      logging.info('Start processing tsv.')
+      try:
+        ret = func(self, *args, **kwargs)
+      finally:
+        self.filelock.release()
+      logging.info('Complete processing tsv.')
+      return ret
+    return wrapped
+  
+  @lock_file
+  def load_tsv(self, logs_file=None, parse_str=True):
     '''load tsv with yaml header'''
     if logs_file is not None:
       self.logs_file=logs_file
-      
+    
     for k, v in self.parse_tsv(self.logs_file, parse_str=parse_str).items():
       self.__dict__[k] = v
-  
 
+  @lock_file
   def to_tsv(self, logs_file=None):
     logs_file = self.logs_file if logs_file==None else logs_file
     
     logs_path, _ = os.path.split(logs_file)
     if not os.path.exists(logs_path):
         os.makedirs(logs_path) 
+
+    # pandas dataframe to tsv string
+    df = self.df.reset_index()
+    df['id'] = [*range(len(df))]
+    df = df.set_index(['id', *self.grid_fields])
+    tsv_str = df.to_csv(sep='\t')
     
+    tsv_head, *tsv_body = tsv_str.split('\n')
+    tsv_head = tsv_head.split('\t')
+    col = '\t'.join([' '*len(i) if i in df.index.names else i for i in tsv_head])
+    idx = '\t'.join([i if i in df.index.names else ' '*len(i) for i in tsv_head])
+    tsv_str = '\n'.join([col, idx, *tsv_body])
+    
+    # write static_configs and table of results
     with open(logs_file, 'w') as fd:
-      # write static_configs
       fd.write('[Static Configs]\n')
       yaml.dump(self.static_configs, fd)
       fd.write(self.__sep)
-
-      # write table of results
-      df = self.df.reset_index()
-      df['id'] = [*range(len(df))]
-      df = df.set_index(['id', *self.grid_fields])
-      csv_str = df.to_csv(sep='\t')
-      
-      csv_head, *csv_body = csv_str.split('\n')
-      csv_head = csv_head.split('\t')
-      col = '\t'.join([' '*len(i) if i in df.index.names else i for i in csv_head])
-      idx = '\t'.join([i if i in df.index.names else ' '*len(i) for i in csv_head])
-      csv_str = '\n'.join([col, idx, *csv_body])
-      
-      fd.write(csv_str)
+      fd.write(tsv_str)
       
   
   def update_tsv(func, mode='rw'):
     '''Decorator for read/write tsv before/after given function call'''
     def wrapped(self, *args, **kwargs):
-      if self.auto_update_tsv and 'r' in mode: 
-        self.load_tsv(self.logs_file)
+      if self.auto_update_tsv and 'r' in mode: self.load_tsv(self.logs_file)
       ret = func(self, *args, **kwargs)
       if self.auto_update_tsv and 'w' in mode: self.to_tsv()
       return ret
     return wrapped
-
   
   # Add results.
   # -----------------------------------------------------------------------------
@@ -676,8 +703,13 @@ class Experiment:
   def run(self):
     logging.info('Start running experiments.')
     
+    self.log.filelock.acquire()
+    self.log.load_tsv()
+    
     # run experiment plans 
     for i, config in enumerate(self.configs):
+      
+      self.log.filelock.acquire() ##################################################################
       
       metric_dict, info_dict = self.get_metric_info(config)
       
@@ -690,6 +722,8 @@ class Experiment:
       if self.configs_save:
         self.update_log(config, **metric_dict, status=self.__RUNNING)
 
+      self.log.filelock.release(force=True) ##################################################################
+      
       logging.info('###################################')
       logging.info(f'   Experiment count : {i+1}/{len(self.configs)}')
       logging.info('###################################') 
@@ -705,11 +739,12 @@ class Experiment:
       except:
         metric_dict, _ = self.get_metric_info(config)
         status = self.__FAILED
-        logging.fatal("Experiment failure occured.")  
+        logging.error("Experiment failure occured.")  
         raise
       
       finally:
-        self.update_log(config, **metric_dict, status=status)
+        with self.log.filelock:
+          self.update_log(config, **metric_dict, status=status)
         logging.info("Saved experiment data to log")
       
     logging.info('Complete experiments.')

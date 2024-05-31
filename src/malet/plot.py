@@ -5,7 +5,6 @@ from functools import partial
 from itertools import product
 
 from absl import app, flags
-from ml_collections import ConfigDict
 
 import matplotlib.pyplot as plt
 import matplotlib.style as style

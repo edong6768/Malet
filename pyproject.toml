@@ -28,6 +28,7 @@ classifiers = [
 ]
 dependencies = [
     'absl-py==1.0.0',
+    'filelock',
     'gitpython',
     'pandas',
     'matplotlib',
