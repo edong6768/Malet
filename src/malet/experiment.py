@@ -158,7 +158,10 @@ class ConfigIter:
     return len(self.grid_iter)
     
   
-  
+# Only a temporary measure for empty grid_fields
+pd.DataFrame.old_set_index = pd.DataFrame.set_index
+pd.DataFrame.old_reset_index = pd.DataFrame.reset_index
+pd.DataFrame.old_drop = pd.DataFrame.drop
 
 @dataclass
 class ExperimentLog:
@@ -173,22 +176,30 @@ class ExperimentLog:
   __sep: ClassVar[str] = '-'*45 + '\n'
   
   def __post_init__(self):
+
     # Only a temporary measure for empty grid_fields
-    if not self.grid_fields:
-      og_set_index = pd.DataFrame.set_index
-      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
-      pd.DataFrame.reset_index = lambda self, *__, **_: self
-      
-      og_drop = pd.DataFrame.drop
-      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=self.metric_fields) if axis==0 else og_drop(slf, *_, axis=axis, **__)
-      
+    self.__check_grid_change_df(self.grid_fields, self.metric_fields)
+     
     if self.df is None:
       assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
       assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
       self.df = pd.DataFrame(columns=self.grid_fields+self.metric_fields).set_index(self.grid_fields)
     else:
       self.metric_fields = list(self.df)
-  
+ 
+  @staticmethod
+  def __check_grid_change_df(grid_fields, metric_fields):
+    # Only a temporary measure for empty grid_fields
+    if not grid_fields:
+      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else self.old_set_index(idx, *args, **kwargs)
+      pd.DataFrame.reset_index = lambda self, *__, **_: self
+      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=metric_fields) if axis==0 else slf.old_drop(*_, axis=axis, **__)
+    
+    else:
+      pd.DataFrame.set_index = pd.DataFrame.old_set_index
+      pd.DataFrame.reset_index = pd.DataFrame.old_reset_index
+      pd.DataFrame.drop = pd.DataFrame.old_drop 
+     
   # Constructors.
   # -----------------------------------------------------------------------------  
   @classmethod
@@ -233,13 +244,7 @@ class ExperimentLog:
 
 
     # Only a temporary measure for empty grid_fields
-    if len(idx)==1:
-      og_set_index = pd.DataFrame.set_index
-      pd.DataFrame.set_index = lambda self, idx, *args, **kwargs: self if not idx else og_set_index(self, idx, *args, **kwargs)
-      pd.DataFrame.reset_index = lambda self, *__, **_: self
-      
-      og_drop = pd.DataFrame.drop
-      pd.DataFrame.drop = lambda slf, *_, axis=0, **__: pd.DataFrame(columns=col) if axis==0 else og_drop(slf, *_, axis=axis, **__)
+    cls.__check_grid_change_df(idx[1:], col)
     
     df = pd.read_csv(io.StringIO(csv_str), sep='\t')
     df = df.drop(['id'], axis=1)
@@ -409,6 +414,10 @@ class ExperimentLog:
     self.df, other.df = (obj.df.reset_index() for obj in (self, other))
     self.df = pd.concat([self.df, other.df]) \
                 .set_index(self.grid_fields)[self.metric_fields]
+
+    # Only a temporary measure for empty grid_fields
+    self.__check_grid_change_df(self.grid_fields, self.metric_fields)
+    
     return self
 
   def merge(self, *others, same=True):
