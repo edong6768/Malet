@@ -163,7 +163,7 @@ pd.DataFrame.old_set_index = pd.DataFrame.set_index
 pd.DataFrame.old_reset_index = pd.DataFrame.reset_index
 pd.DataFrame.old_drop = pd.DataFrame.drop
 pd.DataFrame.set_index = lambda self, idx, *__, **_: self if not idx else self.old_set_index(idx, *__, **_)
-pd.DataFrame.reset_index = lambda self, *__, **_: self if not self.index.names else self.old_reset_index(*__, **_)
+pd.DataFrame.reset_index = lambda self, *__, **_: self if self.index.names==[None] else self.old_reset_index(*__, **_)
 pd.DataFrame.drop = lambda self, *_, axis=0, **__: pd.DataFrame(columns=self.columns) if len(self)<2 and axis==0 else self.old_drop(*_, axis=axis, **__)
 
 @dataclass
