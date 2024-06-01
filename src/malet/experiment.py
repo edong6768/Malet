@@ -251,11 +251,8 @@ class ExperimentLog:
   def lock_file(func):
     '''Decorator for filelock acquire/release before/after given function call'''
     def wrapped(self, *args, **kwargs):
-      logging.debug('Waiting to acquire tsv...')
       with self.filelock:
-        logging.debug('Start processing tsv.')
         ret = func(self, *args, **kwargs)
-      logging.debug('Complete processing tsv.')
       return ret
     return wrapped
   

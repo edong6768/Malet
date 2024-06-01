@@ -1,6 +1,9 @@
 import os, shutil, time, uuid
 from typing import Optional
 from ast import literal_eval
+from contextlib import ContextDecorator
+
+from absl import logging
 
 from rich.table import Table
 
@@ -58,8 +61,8 @@ def append_metrics(metric_log=None, **new_metrics):
     return metric_log
 
 
-class QueuedFileLock:
-  delim = '\n'
+class QueuedFileLock(ContextDecorator):
+  __delim = '\n'
   
   def __init__(self, lock_file: str, timeout: float = 10):
     self.lock_file = lock_file
@@ -77,16 +80,16 @@ class QueuedFileLock:
   def __read_queue(self):
     with open(self.lock_file, 'r') as f:
       s = f.read()
-      self.queue = [*map(int, filter(bool, s.split(self.delim)))]
+      self.queue = [*map(int, filter(bool, s.split(self.__delim)))]
       
   def __write_queue(self):
     with open(self.lock_file, 'w') as f:
-      s = self.delim.join(map(str, self.queue))
+      s = self.__delim.join(map(str, self.queue))
       f.write(s)
     
   def __append_write(self):
     with open(self.lock_file, 'a') as f:
-      f.write(f'{self.delim}{self.id}')
+      f.write(f'{self.__delim}{self.id}')
     self.__read_queue()
     
   @property
@@ -108,12 +111,16 @@ class QueuedFileLock:
     if self.id not in self.queue:
       self.__append_write()
     
+    logging.debug(f'Attempting to acquire filelock {self.id} on {self.lock_file}.')
     start_t = time.time()
     while self.is_locked:
+      logging.debug(f'Failed to acquire filelock {self.id} on {self.lock_file}. Waiting for {poll_interval} seconds.')
       time.sleep(poll_interval)
       
       if time.time() - start_t > timeout:
-        raise TimeoutError('Timeout while waiting for lock')
+        raise TimeoutError(f'Timeout while acquiring filelock {self.id} on {self.lock_file}.')
+    
+    logging.debug(f'Filelock {self.id} acquired on {self.lock_file}.')
       
   def release(self, force=False):
     if self.acquire_count == 0: return
@@ -126,9 +133,15 @@ class QueuedFileLock:
       self.__read_queue()
       self.queue.remove(self.id)
       self.__write_queue()
+      
+      logging.debug(f'Released filelock {self.id} on {self.lock_file}.')
   
   def __enter__(self):
     self.acquire()
+    return self
     
   def __exit__(self, *args):
     self.release()
+    
+  def __del__(self):
+    self.release(force=True)
