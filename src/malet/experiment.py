@@ -175,6 +175,7 @@ class ExperimentLog:
   metric_fields: Optional[list] = None
   df: Optional[pd.DataFrame]=None
   auto_update_tsv: bool = False
+  use_filelock: bool = False
   
   __sep: ClassVar[str] = '-'*45 + '\n'
   
@@ -187,19 +188,23 @@ class ExperimentLog:
     else:
       self.metric_fields = list(self.df)
     
-    self.filelock = QueuedFileLock(self.logs_file+'.lock', timeout=3*60*60)
+    if self.use_filelock:
+      self.filelock = QueuedFileLock(self.logs_file+'.lock', timeout=3*60*60)
   
   # Constructors.
   # -----------------------------------------------------------------------------  
   @classmethod
-  def from_exp_config(cls, exp_config, logs_file: str, metric_fields: Optional[list]=None, auto_update_tsv: bool=False):
+  def from_exp_config(cls, exp_config, logs_file: str, metric_fields: Optional[list]=None, auto_update_tsv: bool=False, use_filelock: bool=False):
     return cls(*(exp_config[k] for k in ['static_configs', 'grid_fields']), logs_file=logs_file,
-               metric_fields=metric_fields, auto_update_tsv = auto_update_tsv)
+               metric_fields=metric_fields, auto_update_tsv = auto_update_tsv, use_filelock=use_filelock)
 
   @classmethod
-  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=False):
+  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=False, use_filelock: bool=False):
     '''open tsv with yaml header'''
-    with QueuedFileLock(logs_file+'.lock', timeout=3*60*60):
+    if use_filelock:
+      with QueuedFileLock(logs_file+'.lock', timeout=3*60*60):
+        log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+    else:
       log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
     return log
   
@@ -251,9 +256,11 @@ class ExperimentLog:
   def lock_file(func):
     '''Decorator for filelock acquire/release before/after given function call'''
     def wrapped(self, *args, **kwargs):
-      with self.filelock:
-        ret = func(self, *args, **kwargs)
-      return ret
+      if self.use_filelock:
+        with self.filelock:
+          return func(self, *args, **kwargs)
+      else:
+        return func(self, *args, **kwargs)
     return wrapped
   
   @lock_file
@@ -471,7 +478,7 @@ class ExperimentLog:
   def melt_and_explode_metric(self, df=None, step=None):
     if df is None: 
       df = self.df
-    mov_to_index = lambda *fields: df.reset_index().set_index([*df.index.names, *fields])
+    mov_to_index = lambda *fields: df.reset_index().set_index((dn if (dn:=df.index.names)!=[None] else [])+[*fields])
     
     # melt
     df = df.melt(value_vars=list(df), var_name='metric', value_name='metric_value', ignore_index=False)
@@ -614,14 +621,14 @@ class Experiment:
   def __get_log(self, logs_file, metric_fields=None, auto_update_tsv=False):
     # Configure experiment log
     if os.path.exists(logs_file): # Check if there already is a file
-      log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv) # resumes automatically
+      log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv, use_filelock=True) # resumes automatically
       
     else: # Create new log
       logs_path, _ = os.path.split(logs_file)
       if not os.path.exists(logs_path):
         os.makedirs(logs_path)
       log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file,
-                                          metric_fields=metric_fields, auto_update_tsv=auto_update_tsv)
+                                          metric_fields=metric_fields, auto_update_tsv=auto_update_tsv, use_filelock=True)
       log.to_tsv()
       
     return log
