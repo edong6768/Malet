@@ -78,9 +78,21 @@ class QueuedFileLock(ContextDecorator):
     self.__read_queue()
     
   def __read_queue(self):
-    with open(self.lock_file, 'r') as f:
-      s = f.read()
-      self.queue = [*map(int, filter(bool, s.split(self.__delim)))]
+    success=False
+    for i in range(10):
+      try:
+        with open(self.lock_file, 'r') as f:
+          s = f.read()
+          parseint = lambda x: int(x.strip('\x00'))
+          self.queue = [*map(parseint, filter(bool, s.split(self.__delim)))]
+          success = True
+        break
+      except:
+        logging.info(f'Failed to read queue from {self.lock_file} (Attempt: {i+1}/10). Retrying after 0.1s.')
+        time.sleep(0.1)
+        continue
+    if not success:
+      raise Exception(f'Failed to read queue from {self.lock_file}.')
       
   def __write_queue(self):
     with open(self.lock_file, 'w') as f:

@@ -203,9 +203,9 @@ class ExperimentLog:
     '''open tsv with yaml header'''
     if use_filelock:
       with QueuedFileLock(logs_file+'.lock', timeout=3*60*60):
-        log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+        log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv, use_filelock=use_filelock)
     else:
-      log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv)
+      log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv, use_filelock=use_filelock)
     return log
   
   
@@ -574,7 +574,8 @@ class Experiment:
                curr_split: Union[int, str] = 0,
                auto_update_tsv: bool = False,
                configs_save: bool = False,
-               checkpoint: bool = False
+               checkpoint: bool = False,
+               filelock: bool = False
     ):
     
     if checkpoint:
@@ -584,12 +585,13 @@ class Experiment:
 
     self.configs_save = configs_save
     self.checkpoint = checkpoint
+    self.filelock = filelock
     
     do_split = isinstance(total_splits, int) and total_splits>1 or isinstance(total_splits, str)
     cfg_file, tsv_file, _ = self.get_paths(exp_folder_path, split=curr_split if do_split else None)
     
     self.configs = self.__get_and_split_configs(cfg_file, total_splits, curr_split)
-    self.log = self.__get_log(tsv_file, self.infos+exp_metrics, auto_update_tsv)
+    self.log = self.__get_log(tsv_file, self.infos+exp_metrics, auto_update_tsv, filelock)
     
     self.__check_matching_static_configs()
     
@@ -618,17 +620,17 @@ class Experiment:
     
     return configiter
       
-  def __get_log(self, logs_file, metric_fields=None, auto_update_tsv=False):
+  def __get_log(self, logs_file, metric_fields=None, auto_update_tsv=False, filelock=False):
     # Configure experiment log
     if os.path.exists(logs_file): # Check if there already is a file
-      log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv, use_filelock=True) # resumes automatically
+      log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv, use_filelock=filelock) # resumes automatically
       
     else: # Create new log
       logs_path, _ = os.path.split(logs_file)
       if not os.path.exists(logs_path):
         os.makedirs(logs_path)
       log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file,
-                                          metric_fields=metric_fields, auto_update_tsv=auto_update_tsv, use_filelock=True)
+                                          metric_fields=metric_fields, auto_update_tsv=auto_update_tsv, use_filelock=filelock)
       log.to_tsv()
       
     return log
@@ -682,51 +684,54 @@ class Experiment:
   def run(self):
     logging.info('Start running experiments.')
     
-    logging.info(self.log.filelock.is_locked)
-    logging.info(self.log.filelock.id)
-    
-    self.log.filelock.acquire()
-    self.log.load_tsv()
-    
-    # run experiment plans 
-    for i, config in enumerate(self.configs):
+    if self.filelock:
+      logging.info(self.log.filelock.is_locked)
+      logging.info(self.log.filelock.id)
       
-      self.log.filelock.acquire() ##################################################################
+      self.log.filelock.acquire()
+      self.log.load_tsv()
       
-      metric_dict, info_dict = self.get_metric_info(config)
-      
-      # skip already executed runs
-      if info_dict.get('status') in {self.__RUNNING, self.__COMPLETED}: continue
-      
-      self.__curr_runinfo = RunInfo(prev_duration=pd.to_timedelta(info_dict.get('duration', '0')))
-      
-      # if config not in self.log or status==self.__FAILED
-      if self.configs_save:
-        self.update_log(config, **metric_dict, status=self.__RUNNING)
-
-      self.log.filelock.release(force=True) ##################################################################
-      
-      logging.info('###################################')
-      logging.info(f'   Experiment count : {i+1}/{len(self.configs)}')
-      logging.info('###################################') 
-
-
-      try:
-        if self.checkpoint:
-          metric_dict = self.exp_func(config, self)
-        else:
-          metric_dict = self.exp_func(config)
-        status = self.__COMPLETED
+    # check for left-over experiments (100 times for now)
+    for _ in range(10):
+      # run experiment plans 
+      for i, config in enumerate(self.configs):
         
-      except:
-        metric_dict, _ = self.get_metric_info(config)
-        status = self.__FAILED
-        logging.error("Experiment failure occured.")
-        raise
-      
-      finally:
-        self.update_log(config, **metric_dict, status=status)
-        logging.info("Saved experiment data to log.")
+        if self.filelock: self.log.filelock.acquire() ##################################################################
+        
+        metric_dict, info_dict = self.get_metric_info(config)
+        
+        # skip already executed runs
+        if info_dict.get('status') in {self.__RUNNING, self.__COMPLETED}: continue
+        
+        self.__curr_runinfo = RunInfo(prev_duration=pd.to_timedelta(info_dict.get('duration', '0')))
+        
+        # if config not in self.log or status==self.__FAILED
+        if self.configs_save:
+          self.update_log(config, **metric_dict, status=self.__RUNNING)
+
+        if self.filelock: self.log.filelock.release(force=True) ##################################################################
+        
+        logging.info('###################################')
+        logging.info(f'   Experiment count : {i+1}/{len(self.configs)}')
+        logging.info('###################################') 
+
+
+        try:
+          if self.checkpoint:
+            metric_dict = self.exp_func(config, self)
+          else:
+            metric_dict = self.exp_func(config)
+          status = self.__COMPLETED
+          
+        except:
+          metric_dict, _ = self.get_metric_info(config)
+          status = self.__FAILED
+          logging.error("Experiment failure occured.")
+          raise
+        
+        finally:
+          self.update_log(config, **metric_dict, status=status)
+          logging.info("Saved experiment data to log.")
       
     logging.info('Complete experiments.')
       
