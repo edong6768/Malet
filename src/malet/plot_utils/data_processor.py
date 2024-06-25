@@ -44,8 +44,8 @@ def select_df(df, filt_dict, *exclude_fields, equal=True, drop=False):
 
 def homogenize_df(df, ref_df, filt_dict, *exclude_fields):
     """Homogenize index values of ``df`` with reference to ``select_df(ref_df, filt_dict)``."""
-    ref_idx = select_df(ref_df, filt_dict, drop=True).index
-    slcted_dfs = [select_df(df, dict(zip(ref_idx.names, d))) for d in ref_idx.values]
+    ref_idx = select_df(ref_df, filt_dict, *exclude_fields, drop=True).index
+    slcted_dfs = [select_df(df, dict(zip(ref_idx.names, d)), *exclude_fields) for d in ref_idx.values]
     df = pd.concat(slcted_dfs)
     return df
 
@@ -94,6 +94,6 @@ def avgbest_df(df, metric_field,
 
         # match best_over values for non-best_of-key-index with best_of-key-index
         df_fields -= set(best_of)
-        df = homogenize_df(df, best_df, best_of, *df_fields)
+        df = homogenize_df(df, best_df, best_of, 'step', 'total_steps')
     
     return df

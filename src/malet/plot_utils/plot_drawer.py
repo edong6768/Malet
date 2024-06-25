@@ -252,7 +252,7 @@ def ax_draw_heatmap(ax: Axes,
             for j, y in enumerate([*grid_df.index.get_level_values(0)]):
                 txt = '\n'.join([f'{grid_df.loc[y, (mtc, x)]:.5f}'
                                  +(f'\n$\pm${std_grid_df.loc[y, (f"{mtc}_std", x)]:.5f}' if (f'{y_field}_std' in df and pd.notna(std_grid_df.loc[y, (f'{mtc}_std', x)])) else '')]
-                                +[f'{i}={df.loc[(x, y), j]}' for i, j in zip(abv_annot, annotate_field)])
+                                 +[f'{i}={df.loc[(x, y), j]}' for i, j in zip(abv_annot, annotate_field) if df.index.isin([(x, y)]).any()])
                 ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
     
     # ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)

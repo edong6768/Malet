@@ -84,8 +84,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         #--- initial filter for df according to FLAGS.filter (except epoch and metric)
         if pflt:
             filt_dict = [*map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/'))] # split ' ' except ', '
-            log.df = select_df(log.df, {fk:[*map(str2value, fvs)] for fk, *fvs in filt_dict if fk[-1]!='!' and fk not in {'step', 'metric'}})
-            log.df = select_df(log.df, {fk[:-1]:[*map(str2value, fvs)] for fk, *fvs in filt_dict if fk[-1]=='!' in fk and fk not in {'step', 'metric'}}, equal=False)
+            log.df = select_df(log.df, {fk:[*map(str2value, fvs)] for fk, *fvs in filt_dict if fk[-1]!='!' and fk not in {'step', 'total_steps', 'metric'}})
+            log.df = select_df(log.df, {fk[:-1]:[*map(str2value, fvs)] for fk, *fvs in filt_dict if fk[-1]=='!' in fk and fk not in {'step', 'total_steps', 'metric'}}, equal=False)
         
         #--- melt and explode metric in log.df
         if 'metric' not in pmlf and 'metric' not in x_fields:
@@ -99,8 +99,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         #---filter df according to FLAGS.filter step and metrics
         if pflt:
             e_rng = lambda fvs: [*range(*map(int, fvs[0].split(':')))] if (len(fvs)==1 and ':' in fvs[0]) else fvs # CNG 'a:b' step filter later
-            df = select_df(df, {fk:[*map(str2value, e_rng(fvs))] for fk, *fvs in filt_dict if fk[-1]!='!' and  fk in {'step', 'metric'}}) 
-            df = select_df(df, {fk[:-1]:[*map(str2value, e_rng(fvs))] for fk, *fvs in filt_dict if fk[-1]=='!' and  fk in {'step', 'metric'}}, equal=False) 
+            df = select_df(df, {fk:[*map(str2value, e_rng(fvs))] for fk, *fvs in filt_dict if fk[-1]!='!' and  fk in {'step', 'total_steps', 'metric'}})
+            df = select_df(df, {fk[:-1]:[*map(str2value, e_rng(fvs))] for fk, *fvs in filt_dict if fk[-1]=='!' and  fk in {'step', 'total_steps', 'metric'}}, equal=False)
         
         
         #---set mlines according to FLAGS.multi_line_fields
@@ -115,13 +115,14 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         best_over = set(df.index.names) - {*x_fields, 'metric', 'seed', *pmlf}
         best_at_max = pcfg['best_at_max']
-        
+       
+        #---automatically set best_ref_metric_field of step 
         if 'step' in x_fields:
             if not pcfg['best_ref_x_fields']:
                 pcfg['best_ref_x_fields'] = ['']*len(x_fields)
             i = x_fields.index('step')
-            if 'step' in pflt:
-                st = [i for i in filt_dict if 'step' in i][0][1]
+            if pflt and 'step' in dict(filt_dict):
+                st = dict(filt_dict)['step']
                 pcfg['best_ref_x_fields'][i] = int(st.split(':')[1])-1 if ':' in st else int(st) # CNG 'a:b' step filter later
             else:
                 pcfg['best_ref_x_fields'][i]=min(*df.index.get_level_values('total_steps'))
