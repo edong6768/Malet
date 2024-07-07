@@ -66,7 +66,7 @@ def ax_draw_curve(ax: Axes,
                 ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
                 
         if annotate:
-            assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+            assert not (f:=set(annotate_field) - (a:=set(df) - {'total_steps', 'step', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
             annotate_field = set(annotate_field) & a
             abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
                                       [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
@@ -149,7 +149,7 @@ def ax_draw_best_stared_curve(ax: Axes,
                 
                 
         if annotate:
-            assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+            assert not (f:=set(annotate_field) - (a:=set(df) - {'total_steps', 'step', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
             annotate_field = set(annotate_field) & a
             abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
                                       [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
@@ -194,7 +194,7 @@ def ax_draw_bar(ax: Axes,
         ax.bar(tick_values, metric_values, label=label, color=color)
         
     if annotate:
-        assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+        assert not (f:=set(annotate_field) - (a:=set(df) - {'total_steps', 'step', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
         annotate_field = set(annotate_field) & a
         abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
                                 [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
@@ -235,7 +235,7 @@ def ax_draw_heatmap(ax: Axes,
     ax.set_yticks(np.arange(0.5, len(x_values[1]), 1), x_values[1], fontsize=10)
         
     if annotate:
-        assert not (f:=set(annotate_field) - (a:=set(df) - {'total_epochs', 'epoch', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
+        assert not (f:=set(annotate_field) - (a:=set(df) - {'total_steps', 'step', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
         annotate_field = set(annotate_field) & a
         abv = lambda s: ''.join([i[0] for i in s.split('_')] if '_' in s else \
                                 [s[0]] + [i for i in s[1:] if i not in 'aeiou']) if len(s)>3 else s
@@ -256,4 +256,35 @@ def ax_draw_heatmap(ax: Axes,
                 ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
     
     # ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
+    return ax
+
+
+
+def ax_prcs_draw_scatter(ax: Axes,
+                         df: pd.DataFrame,
+                         y_fields: list,
+                         color = 'orange',
+                         marker = 'D', 
+                         markersize = 30,
+                         **_
+    ) -> Axes:
+    """
+    Draws scatter of two arbitrary y_fields.
+    """
+    assert len(set(df.index.get_level_values('metric')))==2, 'There should be only 2 metrics in the dataframe.'
+    assert set(df.index.get_level_values('metric'))==set(y_fields), 'y_fields should be the same as metrics in the dataframe.' 
+    
+    df = df.reset_index(['total_steps', 'step'], drop=True)
+    
+    # revert back melted metrics into original column form
+    prcs = lambda y: (df.loc[df.index.get_level_values('metric')==y]
+                        .reset_index('metric', drop=True)
+                        .rename(columns={'metric_value': y}))
+    
+    df = pd.concat([*map(prcs, y_fields)], axis=1)
+    
+    y1, y2 = map(lambda y: list(df[y]), y_fields)
+    
+    ax.scatter(y1, y2, color=color, marker=marker, s=markersize*8, edgecolors='black')
+    
     return ax
