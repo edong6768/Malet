@@ -216,22 +216,26 @@ class ExperimentLog:
     '''parses tsv file into usable datas'''
     assert os.path.exists(log_file), f'File path "{log_file}" does not exists.'
 
-    with open(log_file, 'r') as fd:
-      # process yaml config header
-      def header():
-        next(fd)
-        header = ''
-        for s in fd:
-          if s==cls.__sep: break
-          header += s
-        return header
-    
-      # get workload data from yaml header
-      static_configs = yaml.safe_load(header())
+    try:
+      with open(log_file, 'r') as fd:
+        # process yaml config header
+        def header():
+          next(fd)
+          header = ''
+          for s in fd:
+            if s==cls.__sep: break
+            header += s
+          return header
+      
+        # get workload data from yaml header
+        static_configs = yaml.safe_load(header())
 
-      # get dataframe from csv body
-      tsv_str = fd.read()
-    
+        # get dataframe from csv body
+        tsv_str = fd.read()
+        
+    except:
+      raise Exception(f'Error while reading log file: {log_file}')
+      
     tsv_col, tsv_idx, *tsv_body = tsv_str.split('\n')
     col = tsv_col.strip().split('\t')
     idx = tsv_idx.strip().split('\t')
