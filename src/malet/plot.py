@@ -110,7 +110,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         #--- melt and explode metric in log.df
         if 'metric' not in pmlf and 'metric' not in x_fields:
             log.df = log.df.drop(list(set(log.df)-{*metrics, pcfg['best_ref_metric_field']}), axis=1)
-        df = log.melt_and_explode_metric(step=None if 'step' in x_fields or 'step' in pflt else -1)
+        df = log.melt_and_explode_metric(step=None if (('step' in x_fields) or ('step' in pflt) or (not plot_config['step_best'])) else -1)
         
         assert not df.empty, f'Metrics {metrics}' +\
             (f' and best_ref_metric_field {pcfg["best_ref_metric_field"]} are' if pcfg["best_ref_metric_field"] else ' is') +\
@@ -346,6 +346,7 @@ def main(preprcs_df = lambda *x: x):
     flags.DEFINE_string('best_ref_metric_field', '', "Reference metric_field-values to evaluate optimal hyperparameters.")
     flags.DEFINE_spaceseplist('best_ref_ml_fields', '', "Reference multi_line_fields-value to evaluate optimal hyperparameters.")
     flags.DEFINE_bool('best_at_max', False, 'Whether the bese metric value is the maximum value.')
+    flags.DEFINE_bool('step_best', False, 'Whether to choose best performing step or final step.')
     
     flags.DEFINE_string('plot_config', '', "Yaml file path for various plot setups.")
     flags.DEFINE_string('colors', '', "color scheme ('', 'cont').")
