@@ -77,22 +77,19 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             ax_draw = {'curve':      ax_draw_curve,
                        'curve_best': ax_draw_best_stared_curve,
                        'bar':        ax_draw_bar}[mode]
-            x_label = x_fields[0].replace('_', ' ').capitalize()
-            y_label = metrics[0].replace('_', ' ').capitalize()
+            x_label, y_label = (f.replace('_', ' ').capitalize() for f in (x_fields[0],  metrics[0]))
         elif mode=='heatmap':
             assert len(x_fields)==2, f'Number of x_fields shoud be 2 when using heatmap mode, but you passed {len(x_fields)}.'
             assert len(metrics)==1, f'Number of metric shoud be 1 when using heatmap mode, but you passed {metrics}.'
             assert not pmlf, f'No multi_line_fields are allowed in heatmap mode, but you passed {pmlf}.'
             ax_draw = ax_draw_heatmap
-            x_label = x_fields[0].replace('_', ' ').capitalize()
-            y_label = x_fields[1].replace('_', ' ').capitalize()
+            x_label, y_label = (f.replace('_', ' ').capitalize() for f in x_fields)
         elif mode=='scatter':
             assert not x_fields, f'No x_fields are allowed in scatter mode, but you passed {x_fields}.'
             assert len(metrics)==2, f'Number of metric shoud be 2 when using scatter mode, but you passed {metrics}.'
             assert len(pmlf)<=2, f'Number of multi_line_fields should be less than 2, but you passed {len(pmlf)}'
             ax_draw = ax_prcs_draw_scatter
-            x_label = metrics[0].replace('_', ' ').capitalize()
-            y_label = metrics[1].replace('_', ' ').capitalize()
+            x_label, y_label = (f.replace('_', ' ').capitalize() for f in metrics)
         
         # get dataframe, drop unused metrics for efficient process
         log = ExperimentLog.from_tsv(tsv_file)
@@ -143,7 +140,6 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 
         # build save name
         save_name = __save_name_builder(pflt, pmlf, pcfg, save_name=save_name)
-        
         
         ############################# Prepare dataframe #############################
         
