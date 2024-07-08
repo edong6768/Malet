@@ -234,7 +234,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         elif pcfg['colors']=='cont':
             style_dict['color'] = [c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:])]# if i%2]
 
-        style_dict.update({'marker': ['o', 's', 'D', 'v', '^', '<', '>', 'p', 'P', '*', 'h', 'H', '+', 'x', 'X', '|', '_'],
+        style_dict.update({'marker': ['D', 'o', '>', 'X', 's', 'v', '^', '<', 'p', 'P', '*', '+', 'x', 'h', 'H', '|', '_'],
                            'linestyle': ['-', '--', '-.', ':']*3})
         styles = product(*[[*style_dict[s]][:len(set(k))] for s, k in zip(['color', 'marker', 'linestyle'], map(df.index.get_level_values, pmlf))])
         
@@ -271,17 +271,22 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                          **pcfg['line_style'])
 
         # set legend, improve later
-        legendlines, legendlabels = [], []
+        style_types = ['color', 'marker', 'linestyle']
         base_styles = {'color': 'gray', 'marker': '', 'linestyle': '-'}
-        first_style = {k:v[0] for k, v in style_dict.items()}
+        first_styles = {k:v[0] for k, v in style_dict.items() if k in (style_types[len(pmlf):] if len(pmlf)<3 else [])} # when plmf is not full, legend are style with the first values of unused style_types
         max_row = max([len(set(df.index.get_level_values(k))) for k in pmlf])
-        for s, k in zip(['color', 'marker', 'linestyle'], pmlf):
+        
+        legendlines, legendlabels = [], []
+        for s, k in zip(style_types, pmlf):
+            extra = {'linewidth': 0} if s=='marker' else {}
+                
             vs = sorted(set(df.index.get_level_values(k)))
             legendlines += [lines.Line2D([], [], alpha=0)] + \
-                           [lines.Line2D([], [], **{**pcfg['line_style'], **base_styles, **{s: ss}}) for ss in [*style_dict[s]][:len(vs)]] + \
+                           [lines.Line2D([], [], **{**pcfg['line_style'], **base_styles, **first_styles, **extra, **{s: ss}}) for ss in [*style_dict[s]][:len(vs)]] + \
                            [lines.Line2D([], [], alpha=0) for _ in range(max_row-len(vs))]
-            legendlabels += [k, *vs] + ['' for _ in range(max_row-len(vs))]
-        ax.legend(handles=legendlines, labels=legendlabels, **pcfg['ax_style'].pop('legend')[0], ncol=len(pmlf))
+            legendlabels += [k.replace('_', ' ').capitalize()+'', *vs] + ['' for _ in range(max_row-len(vs))]
+        
+        ax.legend(handles=legendlines, labels=legendlabels, **pcfg['ax_style'].pop('legend')[0], ncol=len(pmlf) if len(pmlf)<3 else 1, columnspacing=0.8)
         
         return best_df, fig, ax, x_label, y_label, save_name.strip('-')
     

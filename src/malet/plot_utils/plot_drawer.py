@@ -17,6 +17,7 @@ def ax_draw_curve(ax: Axes,
                   marker = 'D', 
                   markersize = 10, 
                   markevery = 20,
+                  linestyle = '-',
                   **_
     ) -> Axes:
     """
@@ -52,7 +53,7 @@ def ax_draw_curve(ax: Axes,
             ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
             
         ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
-                marker=marker, markersize=markersize, markevery=markevery)
+                marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
         
         if len(x_values)%markevery!=0:
             ax.plot(tick_values[-1], metric_values[-1], color=color, marker=marker, markersize=markersize)
@@ -94,6 +95,7 @@ def ax_draw_best_stared_curve(ax: Axes,
                   marker = 'D', 
                   markersize = 10, 
                   markevery = 20,
+                  linestyle = '-',
                   **_
     ) -> Axes:
     """
@@ -145,7 +147,7 @@ def ax_draw_best_stared_curve(ax: Axes,
                         marker='*', markersize=markersize+10)
             else:
                 ax.plot(tick_values[i], metric_values[i], color=color, 
-                        marker=marker, markersize=markersize, markevery=markevery)
+                        marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
                 
                 
         if annotate:
