@@ -235,7 +235,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             style_dict['color'] = [c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:])]# if i%2]
 
         style_dict.update({'marker': ['D', 'o', '>', 'X', 's', 'v', '^', '<', 'p', 'P', '*', '+', 'x', 'h', 'H', '|', '_'],
-                           'linestyle': ['-', '--', '-.', ':']*3})
+                           'linestyle': ['-', ':', '-.', '--']*3})
         styles = product(*[[*style_dict[s]][:len(set(k))] for s, k in zip(['color', 'marker', 'linestyle'], map(df.index.get_level_values, pmlf))])
         
         # select specified metric if multi_line_fields isn't metric
@@ -283,10 +283,10 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             vs = sorted(set(df.index.get_level_values(k)))
             legendlines += [lines.Line2D([], [], alpha=0)] + \
                            [lines.Line2D([], [], **{**pcfg['line_style'], **base_styles, **first_styles, **extra, **{s: ss}}) for ss in [*style_dict[s]][:len(vs)]] + \
-                           [lines.Line2D([], [], alpha=0) for _ in range(max_row-len(vs))]
-            legendlabels += [k.replace('_', ' ').capitalize()+'', *vs] + ['' for _ in range(max_row-len(vs))]
+                           ([lines.Line2D([], [], alpha=0) for _ in range(max_row-len(vs))] if len(pmlf)<3 else [])
+            legendlabels += [f"[{k.replace('_', ' ').capitalize()}]", *vs] + (['' for _ in range(max_row-len(vs))] if len(pmlf)<3 else [])
         
-        ax.legend(handles=legendlines, labels=legendlabels, **pcfg['ax_style'].pop('legend')[0], ncol=len(pmlf) if len(pmlf)<3 else 1, columnspacing=0.8)
+        ax.legend(handles=legendlines, labels=legendlabels, **pcfg['ax_style'].pop('legend', [{}])[0], ncol=len(pmlf) if len(pmlf)<3 else 1, columnspacing=0.8)
         
         return best_df, fig, ax, x_label, y_label, save_name.strip('-')
     
