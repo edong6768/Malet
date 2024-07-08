@@ -190,6 +190,11 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             sm_bestof = {}
             if best_of.get('step') in {'last', 'best'}:
                 sm_bestof['step'] = best_of.pop('step')
+                
+                # add step to best_over to compute optimal step
+                if sm_bestof['step']=='best':
+                    best_over |= {'step'}
+                    
             if 'metric' in best_of:
                 sm_bestof['metric'] = best_of.pop('metric')
             
@@ -204,19 +209,18 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             if sm_bestof:
                 avg_df = avgbest_df(df, 'metric_value', avg_over='seed')
                 
-            if 'step' in sm_bestof:
-                if sm_bestof['step']=='last':
-                    step_df = best_df.loc[best_df.index.get_level_values('step')==best_df.index.get_level_values('total_steps')]
-                elif sm_bestof['step']=='best':
-                    step_df = avgbest_df(best_df, 'metric_value', best_over=['step', *best_over], best_at_max=best_at_max)
+                if 'step' in sm_bestof:
+                    sm_df = best_df
+                    if sm_bestof['step']=='last':
+                        sm_df = best_df.loc[best_df.index.get_level_values('step')==best_df.index.get_level_values('total_steps')]
+                    sm_df = sm_df.reset_index(['step'], drop=True)
+                    
+                if 'metric' in sm_bestof:
+                    sm_df = select_df(sm_df, {'metric': sm_bestof['metric']}, drop=True)
+                    
+                # homogenize best_df with sm_df, exclude 'total_steps'
+                best_df = homogenize_df(avg_df, sm_df, {}, 'total_steps')
                 
-                # homogenize best_df with step_df
-                best_df = homogenize_df(avg_df, step_df.reset_index(['step'], drop=True), {})
-                del sm_bestof['step']
-            
-            if 'metric' in sm_bestof:
-                # homogenize best_df with metric_df, exclude 'step' and 'total_steps'
-                best_df = homogenize_df(avg_df, best_df, sm_bestof, 'step', 'total_steps')              
         
         print('\n', Align(df2richtable(best_df), align='center'))
         
