@@ -96,6 +96,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         assert all(m in log.df for m in metrics), f'Metric {[m for m in metrics if m not in log.df]} not in log. Choose between {list(log.df)}'
         
         #--- initial filter for df according to FLAGS.filter (except step and metric)
+        filt_dict = {}
         if pflt:
             after_filt = {'step', 'total_steps', 'metric'}
             filt_dict = [*map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/'))] # split ' ' except ', '
@@ -128,7 +129,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         
         #---preprocess best_ref_x_fields and automatically set best_ref_x_field of step 
         pcfg['best_ref_x_fields'] = [*map(str2value, pcfg['best_ref_x_fields'])]
-        if 'step' in x_fields:
+        if 'step' in x_fields and not pcfg['best_ref_x_fields']:
             pcfg['best_ref_x_fields'] = ['' for _ in x_fields]
             pcfg['best_ref_x_fields'][x_fields.index('step')] = 'last'
         
