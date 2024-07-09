@@ -18,8 +18,8 @@ def create_dir(dir):
     os.makedirs(dir)
     
 
-def df2richtable(df):
-  table = Table(title='Metric Summary Table')
+def df2richtable(df, title=None):
+  table = Table(title=title)
   df = df.reset_index()
   
   table.add_column('id')

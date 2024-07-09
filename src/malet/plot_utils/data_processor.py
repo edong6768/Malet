@@ -44,8 +44,8 @@ def select_df(df, filt_dict, *exclude_fields, equal=True, drop=False):
 
 def homogenize_df(df, ref_df, filt_dict, *exclude_fields):
     """Homogenize index values of ``df`` with reference to ``select_df(ref_df, filt_dict)``."""
-    # assumption : grid should be complete, else some fields in filt_dict will be missing.
-    #              also, when metric in filt_dict, step and total_steps can be metric-dependent and could return empty df.
+    # caveats : grid should be complete, else some fields in filt_dict will be missing.
+    #           also, when metric in filt_dict, step and total_steps can be metric-dependent and could return empty df.
     ref_idx = select_df(ref_df, filt_dict, *exclude_fields, drop=True).index
     slcted_dfs = [select_df(df, dict(zip(ref_idx.names, d)), *exclude_fields) for d in ref_idx.values]
     df = pd.concat(slcted_dfs)
