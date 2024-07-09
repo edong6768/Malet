@@ -260,18 +260,29 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         pcfg['ax_style']['fig_size'] = [p*l for p, l in zip([len(row_vs), len(col_vs)], fig_size)]
         legend_style = pcfg['ax_style'].pop('legend', [{}])[0]
         
+        # set unif_xticks for curve
+        if mode in {'curve', 'curve_best'} and pcfg['xscale']=='unif':
+            pcfg['ax_style'].pop('xscale', None)
+            pcfg['line_style']['unif_xticks'] = True
+        
         # prepare plot
         fig, axs = plt.subplots(len(col_vs), len(row_vs), sharex=True, sharey=True)
         
-        style_dict = {}
-        if pcfg['colors']=='':
-            style_dict['color'] = sns.color_palette()*10
-        elif pcfg['colors']=='cont':
-            style_dict['color'] = [c for i, c in enumerate(sum(map(sns.color_palette, ["light:#9467bd", "Blues", "rocket", "crest", "magma"]*3), [])[1:])]# if i%2]
-
-        style_dict.update({'marker': ['D', 'o', '>', 'X', 's', 'v', '^', '<', 'p', 'P', '*', '+', 'x', 'h', 'H', '|', '_'],
-                           'linestyle': ['-', ':', '-.', '--']*3})
-        styles = [*product(*[[*style_dict[s]][:len(set(k))] for s, k in zip(['color', 'marker', 'linestyle'], map(df.index.get_level_values, pmlf))])]
+        # set style types per mode
+        if mode in {'curve', 'curve_best'}:
+            style_types = ['color', 'linestyle', 'marker']
+        elif mode=='bar':
+            style_types = ['color']
+        elif mode=='heatmap':
+            style_types = []
+        elif mode=='scatter':
+            style_types = ['color', 'marker']
+        
+        rep, skp, sft = map(int, pcfg['colors_rep_skip_shift'])
+        style_dict = {'color': [c for i, c in enumerate(sum(map(sns.color_palette, [None if c=='default' else c for c in pcfg['colors']]), [])*rep) if not (i-sft)%(skp+1)],
+                      'marker': ['D', 'o', '>', 'X', 's', 'v', '^', '<', 'p', 'P', '*', '+', 'x', 'h', 'H', '|', '_'],
+                      'linestyle': ['-', ':', '-.', '--']*3}
+        styles = [*product(*[[*style_dict[s]][:len(set(k))] for s, k in zip(style_types, map(df.index.get_level_values, pmlf))])]
         
         for ci, col_v in enumerate(col_vs):
             for ri, row_v in enumerate(row_vs):
@@ -294,9 +305,10 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                     p_df = p_df.sort_index(key=lambda s: [*map(str2value, s)])
                     p_df = p_df[['metric_value', *(set(p_df)-{'metric_value'})]]
                     
-                    pcfg['line_style']['color'] = st[0]
-                    if len(st)>1: pcfg['line_style']['marker'] = st[1]
-                    if len(st)>2: pcfg['line_style']['linestyle'] = st[2]
+                    # set line style
+                    for stp, s in zip(style_types, st):
+                        pcfg['line_style'][stp] = s
+                        
                     ax = ax_draw(ax, p_df, 
                                 label=legend,
                                 **pcfg['line_style'])
@@ -324,7 +336,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 axs[-1, ri].set_xlabel(f'{pcrf[1]}={row_v}', size=pcfg['font_size'])
         
         # set legend, improve later
-        style_types = ['color', 'marker', 'linestyle']
+        
         base_styles = {'color': 'gray', 'marker': '', 'linestyle': '-'}
         first_styles = {k:v[0] for k, v in style_dict.items() if k in (style_types[len(pmlf):] if len(pmlf)<3 else [])} # when plmf is not full, legend are style with the first values of unused style_types
         
@@ -337,8 +349,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 
             vs = sorted(set(df.index.get_level_values(k)))
             legendlines += [lines.Line2D([], [], alpha=0)] + \
-                        [lines.Line2D([], [], **{**pcfg['line_style'], **base_styles, **first_styles, **extra, **{s: ss}}) for ss in [*style_dict[s]][:len(vs)]] + \
-                        ([lines.Line2D([], [], alpha=0) for _ in range(max_row-len(vs))] if is_wide else [])
+                            [lines.Line2D([], [], **{**pcfg['line_style'], **base_styles, **first_styles, **extra, **{s: ss}}) for ss in [*style_dict[s]][:len(vs)]] + \
+                            ([lines.Line2D([], [], alpha=0) for _ in range(max_row-len(vs))] if is_wide else [])
             legendlabels += [f"[{k.replace('_', ' ').capitalize()}]", *vs] + (['' for _ in range(max_row-len(vs))] if is_wide else [])
         
         ax.legend(handles=legendlines, labels=legendlabels, **legend_style, #**pcfg['ax_style'].pop('legend', [{}])[0], 
@@ -416,7 +428,8 @@ def main(preprcs_df = lambda *x: x):
     # plot estehtics
     flags.DEFINE_string(        'plot_config'           , ''        , "Yaml file path for various plot setups.")
     flags.DEFINE_string(        'style'                 , 'default' , "Matplotlib style.")
-    flags.DEFINE_string(        'colors'                , ''        , "color scheme ('', 'cont').")
+    flags.DEFINE_spaceseplist(  'colors'                ,['default'], "color type (e.g., default, light:#9467bd, Blues, rocket, crest, magma).")
+    flags.DEFINE_spaceseplist(  'colors_rep_skip_shift'   ,['1', '0', '0'],  "Skip n colors and shift color list ([c for i, c in enumerate(cs) if not i%(skp+1)+sft]).")
     
     flags.DEFINE_spaceseplist(  'fig_size'              , ''        , 'Figure size.')
     flags.DEFINE_string(        'xscale'                , ''        , "Scale of x-axis (linear, log).")
