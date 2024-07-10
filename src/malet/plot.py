@@ -228,13 +228,25 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 
                 if 'step' in sm_bestof:
                     if sm_bestof['step']=='last':
-                        sm_df = best_df.loc[best_df.index.get_level_values('step')==best_df.index.get_level_values('total_steps')]
+                        sm_df = sm_df.loc[sm_df.index.get_level_values('step')==sm_df.index.get_level_values('total_steps')]
+                        # remove duplicates over total_step (pick best performing, might change later)
+                        # e.g., step 50 best for config with total_step 50, and likewise for step 100, pick step 100 if better than 50
+                        sm_df = avgbest_df(sm_df, 'metric_value', best_over=optimized_field|{'step'})
                     sm_df = sm_df.reset_index(['step'], drop=True)
                 if 'metric' in sm_bestof:
                     sm_df = select_df(sm_df, {'metric': sm_bestof['metric']}, drop=True)
                     
                 # homogenize best_df with sm_df, exclude 'total_steps'
                 best_df = homogenize_df(avg_df, sm_df, {}, 'total_steps')
+        
+        # check if there is any duplicate key_field configs in the best_df
+        assert not best_df.reset_index(list({*best_df.index.names}-key_field)).index.duplicated().any(), \
+            f"Duplicate values in found in dataframe: \n" + str(
+                best_df.reset_index(best_df.index.names)
+                       .groupby([*key_field])
+                       .size()
+                       .loc[lambda x: x>1]
+            )
         
         ############################# Print best_df #############################
         
