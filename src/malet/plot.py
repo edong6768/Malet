@@ -6,6 +6,7 @@ from itertools import product
 
 from absl import app, flags
 
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import style, lines, colors, cm
 import seaborn as sns
@@ -322,6 +323,9 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         fig, axs = plt.subplots(len(row_vs), len(col_vs)+int(has_cbar), 
                                 sharex=True, sharey=True,
                                 gridspec_kw={'width_ratios': [1]*len(col_vs)+([0.1] if has_cbar else [])})
+        
+        if isinstance(axs, plt.Axes):
+            axs = np.array([[axs]])
         for _ in range(2-len(axs.shape)):
             axs = axs[None]
         
