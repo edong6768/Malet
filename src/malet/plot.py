@@ -126,17 +126,22 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         # get dataframe, drop unused metrics for efficient process
         log = ExperimentLog.from_tsv(tsv_file)
         
-        assert all(x in log.df.index.names for x in x_fields),    f'X-field {[x for x in x_fields if x not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
-        assert all(k[:-1] if '!' in k else k in log.df.index.names for k in pflt.keys()), f'Filter keys {[k for k in pflt.keys() if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
-        assert all(k in log.df.index.names for k in pcrf),        f'Column-row fields {[k for k in pcrf if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
-        assert all(k in log.df.index.names for k in pmlf),        f'Multi-line (style) fields {[k for k in pmlf if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
-        assert all(m in log.df for m in metrics),                 f'Metric {[m for m in metrics if m not in log.df]} not in log. Choose between {list(log.df)}'
+        post_melt_k = {'step', 'total_steps', 'metric'}
+        assert all(x in log.df.index.names for x in x_fields if x not in post_melt_k), \
+            f'X-field {[x for x in x_fields if x not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+        assert all(kk in log.df.index.names for k in pflt.keys() if (kk:=k[:-1] if '!' in k else k) not in post_melt_k), \
+            f'Filter keys {[k for k in pflt.keys() if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+        assert all(k in log.df.index.names for k in pcrf if k not in post_melt_k), \
+            f'Column-row fields {[k for k in pcrf if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+        assert all(k in log.df.index.names for k in pmlf if k not in post_melt_k), \
+            f'Multi-line (style) fields {[k for k in pmlf if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+        assert all(m in log.df for m in metrics), \
+            f'Metric {[m for m in metrics if m not in log.df]} not in log. Choose between {list(log.df)}'
         
         #--- initial filter for df according to FLAGS.filter (except step and metric)
         if pflt:
-            after_filt = {'step', 'total_steps', 'metric'}
-            log.df = select_df(log.df, {fk     :[*map(str2value, fvs)] for fk, fvs in pflt.items() if fk[-1]!='!' and fk      not in after_filt})
-            log.df = select_df(log.df, {fk[:-1]:[*map(str2value, fvs)] for fk, fvs in pflt.items() if fk[-1]=='!' and fk[:-1] not in after_filt}, equal=False)
+            log.df = select_df(log.df, {fk     :[*map(str2value, fvs)] for fk, fvs in pflt.items() if fk[-1]!='!' and fk      not in post_melt_k})
+            log.df = select_df(log.df, {fk[:-1]:[*map(str2value, fvs)] for fk, fvs in pflt.items() if fk[-1]=='!' and fk[:-1] not in post_melt_k}, equal=False)
         
         #--- melt and explode metric in log.df
         if 'metric' not in x_fields+pmlf+pcrf:
@@ -151,8 +156,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         if pflt:
             pflt = {k: v for k, v in pflt.items() if (k, v)!=('step', ['best'])}  # Let `avgbest_df` handle 'best' step, remove from pflt
             e_rng = lambda fvs: [*range(*map(int, fvs[0].split(':')))] if (len(fvs)==1 and ':' in fvs[0]) else fvs # CNG 'a:b' step filter later
-            df = select_df(df, {fk     :[*map(str2value, e_rng(fvs))] for fk, fvs in pflt.items() if fk[-1]!='!' and fk      in after_filt})
-            df = select_df(df, {fk[:-1]:[*map(str2value, e_rng(fvs))] for fk, fvs in pflt.items() if fk[-1]=='!' and fk[:-1] in after_filt}, equal=False)
+            df = select_df(df, {fk     :[*map(str2value, e_rng(fvs))] for fk, fvs in pflt.items() if fk[-1]!='!' and fk      in post_melt_k})
+            df = select_df(df, {fk[:-1]:[*map(str2value, e_rng(fvs))] for fk, fvs in pflt.items() if fk[-1]=='!' and fk[:-1] in post_melt_k}, equal=False)
     
     
         ############################# Prepare dataframe #############################
@@ -408,7 +413,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             ax.legend(handles=legendlines, labels=legendlabels, **legend_style, #**pcfg['ax_style'].pop('legend', [{}])[0], 
                       ncol=len(pmlf) if is_wide else 1, columnspacing=0.8, handlelength=None if len(pmlf)==1 else 1.5)
                     
-        return best_df, fig, ax, x_label, y_label, save_name.strip('-')
+        return best_df, fig, save_name
     
 
 def run(argv, preprcs_df):
@@ -438,12 +443,6 @@ def run(argv, preprcs_df):
         ax_st['yscale'] = [yscale, {}]
     if (zscale:=flag_dict.pop('zscale')):
         ax_st['zscale'] = [zscale, {}]
-    # if (title:=flag_dict.pop('title')):
-    #     ax_st['title']  = [title,  {'size': flag_dict['font_size']}]
-    # if (xlabel:=flag_dict.pop('xlabel')):
-    #     ax_st['xlabel'] = [xlabel, {'size': flag_dict['font_size']}]
-    # if (ylabel:=flag_dict.pop('ylabel')):
-    #     ax_st['ylabel'] = [ylabel, {'size': flag_dict['font_size']}]
         
     # set ax_style related arguments
     l_st = plot_config['line_style']
@@ -458,9 +457,8 @@ def run(argv, preprcs_df):
     _, tsv_file, fig_dir = Experiment.get_paths(plot_config['exp_folder'])
     save_dir = os.path.join(fig_dir, plot_config['mode'])
     
-    
     assert plot_config['mode'].split('-')[0] in {'curve', 'curve_best', 'bar', 'heatmap', 'scatter', 'scatter_heat'}, f'Mode: {plot_config["mode"]} does not exist.'
-    df, fig, _, _, _, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
+    df, fig, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
 
     save_figure(fig, save_dir, save_name)
     df.to_csv(os.path.join(save_dir, f'{save_name}.tsv'), sep='\t')
