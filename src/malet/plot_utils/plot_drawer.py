@@ -216,6 +216,7 @@ def ax_draw_heatmap(ax: Axes,
                     cmap = 'magma', 
                     annotate=True,
                     annotate_field=[],
+                    norm = None,
                     **_
         ) -> Axes:
     """
@@ -230,7 +231,7 @@ def ax_draw_heatmap(ax: Axes,
                 .reset_index()
                 .pivot(index=x_fields[1], columns=x_fields[0])
                )
-    ax.pcolor(grid_df, cmap=cmap, edgecolors='w')
+    ax.pcolor(grid_df, cmap=cmap, edgecolors='w', norm=norm)
     
     *x_values, = map(lambda l: sorted(set(y_field_df.index.get_level_values(l))), x_fields)
     ax.set_xticks(np.arange(0.5, len(x_values[0]), 1), x_values[0], fontsize=10, rotation=45)
@@ -262,18 +263,18 @@ def ax_draw_heatmap(ax: Axes,
 
 
 
-def ax_prcs_draw_scatter(ax: Axes,
-                         df: pd.DataFrame,
-                         y_fields: list,
-                         color = 'orange',
-                         marker = 'D', 
-                         markersize = 30,
-                         **_
+def ax_draw_scatter(ax: Axes,
+                    df: pd.DataFrame,
+                    y_fields: list,
+                    color = 'orange',
+                    marker = 'D', 
+                    markersize = 30,
+                    **_
     ) -> Axes:
     """
     Draws scatter of two arbitrary y_fields.
     """
-    assert len(set(df.index.get_level_values('metric')))==2, 'There should be only 2 metrics in the dataframe.'
+    assert len(set(df.index.get_level_values('metric')))==2, 'There should be only {2} metrics in the dataframe.'
     assert set(df.index.get_level_values('metric'))==set(y_fields), 'y_fields should be the same as metrics in the dataframe.' 
     
     df = df.reset_index(['total_steps', 'step'], drop=True)
@@ -288,5 +289,40 @@ def ax_prcs_draw_scatter(ax: Axes,
     y1, y2 = map(lambda y: list(df[y]), y_fields)
     
     ax.scatter(y1, y2, color=color, marker=marker, s=markersize*8, edgecolors='black')
+    
+    return ax
+
+    
+
+
+def ax_draw_scatter_heat(ax: Axes,
+                         df: pd.DataFrame,
+                         y_fields: list,
+                         cmap = 'magma', 
+                         marker = 'D', 
+                         markersize = 30,
+                         norm=None,
+                         **_
+    ) -> Axes:
+    """
+    Draws scatter with colors of three arbitrary y_fields.
+    """
+    assert len(set(df.index.get_level_values('metric')))==3, 'There should be only {3} metrics in the dataframe.'
+    assert set(df.index.get_level_values('metric'))==set(y_fields), 'y_fields should be the same as metrics in the dataframe.' 
+    
+    df = df.reset_index(['total_steps', 'step'], drop=True)
+    
+    # revert back melted metrics into original column form
+    prcs = lambda y: (
+                df.loc[df.index.get_level_values('metric')==y]
+                  .reset_index('metric', drop=True)
+                  .rename(columns={'metric_value': y})
+            )
+    
+    df = pd.concat([*map(prcs, y_fields)], axis=1)
+    
+    y1, y2, y3 = map(lambda y: list(df[y]), y_fields)
+    
+    ax.scatter(y1, y2, c=y3, marker=marker, s=markersize*4, norm=norm, cmap=cmap)
     
     return ax

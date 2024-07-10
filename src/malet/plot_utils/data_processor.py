@@ -52,8 +52,8 @@ def homogenize_df(df, ref_df, filt_dict, *exclude_fields):
     return df
 
 def avgbest_df(df, metric_field,
-               avg_over=None, 
-               best_over=tuple(), 
+               avg_over=set(), 
+               best_over=set(), 
                best_of=dict(), 
                best_at_max=True):
     """Average over ``avg_over`` and get best result over ``best_over``
@@ -62,7 +62,7 @@ def avgbest_df(df, metric_field,
         df (pandas.DataFrame): Base dataframe to operate over. All hyperparameters should be set as `MultiIndex`.
         metric_field (str): Column name of the metric. Used to evaluate best hyperparameter.
         avg_over (str): `MultiIndex` level name to average over.
-        best_over (List[str]): List of `MultiIndex` level names to find value yielding best values of `metric_field`.
+        best_over (Set[str]): List of `MultiIndex` level names to find value yielding best values of `metric_field`.
         best_of (Dict[str, Any]): Dictionary of pair `{MultiIndex name}: {value in MultiIndex}` to find best hyperparameter of. The other values in `{MultiIndex name}` will follow the best hyperparamter found for these values.
         best_at_max (bool): `True` when larger metric is better, and `False` otherwise.
         
@@ -77,7 +77,7 @@ def avgbest_df(df, metric_field,
     
     # avg over avg_over
     if avg_over is not None:
-        df_fields -= {avg_over}
+        df_fields -= avg_over
         avg_over_group = df.groupby([*df_fields], dropna=True)
         df = avg_over_group.mean(numeric_only=True)
         df[metric_field+'_std'] = avg_over_group.sem(numeric_only=True)[metric_field]  # add std column
@@ -85,7 +85,7 @@ def avgbest_df(df, metric_field,
     # best result over best_over
     if best_over:
         # find best result over best_over for best_of
-        df_fields -= set(best_over)
+        df_fields -= best_over
         best_df = select_df(df, best_of)
         if df_fields:
             best_df = best_df.loc[best_df.groupby([*df_fields])[metric_field]
