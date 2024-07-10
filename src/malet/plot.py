@@ -46,7 +46,7 @@ def __save_name_builder(pflt, pmlf, pcrf, pcfg, save_name=''):
     if pflt: sn.append(f"flt({'-'.join(['_'.join([k, *v]) for k, v in pflt.items()])})")
     if any([pcfg[f'best_ref_{k}'] for k in ['x_fields', 'metric_field', 'ml_fields']]):
         sn.append(f"bref({pcfg['best_ref_x_fields']}, {pcfg['best_ref_metric_field']}, {pcfg['best_ref_ml_fields']})")
-    sn.append("-max" if pcfg['best_at_max'] else "-min")
+    sn.append("max" if pcfg['best_at_max'] else "-min")
     return save_name + '-'.join(sn)
 
 
@@ -231,6 +231,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                         sm_df = sm_df.loc[sm_df.index.get_level_values('step')==sm_df.index.get_level_values('total_steps')]
                         # remove duplicates over total_step (pick best performing, might change later)
                         # e.g., step 50 best for config with total_step 50, and likewise for step 100, pick step 100 if better than 50
+                        # in other words, train run stopped at step 50 that performed better than other experiments at step 50 might remain and cause problems.
                         sm_df = avgbest_df(sm_df, 'metric_value', best_over=optimized_field|{'step'})
                     sm_df = sm_df.reset_index(['step'], drop=True)
                 if 'metric' in sm_bestof:
