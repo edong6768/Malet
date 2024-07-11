@@ -479,7 +479,7 @@ class ExperimentLog:
     return fields(self)==fields(other)
     
     
-  def melt_and_explode_metric(self, df=None, step=None):
+  def melt_and_explode_metric(self, df=None, step=None, dropna=True):
     if df is None: 
       df = self.df
     mov_to_index = lambda *fields: df.reset_index().set_index((dn if (dn:=df.index.names)!=[None] else [])+[*fields])
@@ -497,17 +497,18 @@ class ExperimentLog:
         df['step'] = df['metric_value'].map(lambda x: range(1, pseudo_len(x)+1))
         df = df.explode('step')  # explode metric list so each step gets its own row
     else:
-        df['step'] = df['metric_value'].map(lambda x: step + (pseudo_len(x) if step<0 else 0))
+        df['step'] = df['metric_value'].map(lambda x: step + (pseudo_len(x)+1 if step<0 else 0))
     
     df['metric_value'] = df.apply(lambda df: df['metric_value'][df.step-1] if isinstance(df['metric_value'], list) else df['metric_value'], axis=1) # list[epoch] for all fields
     
     df = mov_to_index('step', 'total_steps')
     
     # delete string and NaN valued rows
-    df = df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]\
-              .dropna()\
-              .astype('float')
-    
+    if dropna:
+      df = (
+        df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]
+        .dropna()
+        .astype('float'))
     return df
 
     

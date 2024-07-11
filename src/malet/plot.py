@@ -147,7 +147,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         #--- melt and explode metric in log.df
         if 'metric' not in x_fields+pmlf+pcrf:
             log.df = log.df.drop(list(set(log.df)-{*metrics, pcfg['best_ref_metric_field']}), axis=1)
-        df = log.melt_and_explode_metric(step=-1 if (pflt.get('step', None if ('step' in x_fields) else 'last')=='last') else None)
+        df = log.melt_and_explode_metric(step=-1 if (pflt.get('step', None if ('step' in x_fields) else 'last')=='last') else None,
+                                         dropna=(mode not in {'scatter', 'scatter_heat'}))
         
         assert not df.empty, f'Metrics {metrics}' +\
             (f' and best_ref_metric_field {pcfg["best_ref_metric_field"]} are' if pcfg["best_ref_metric_field"] else ' is') +\
@@ -177,7 +178,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             Align(
                 Columns(
                     [Panel('\n'.join([f'- {k}: {pcfg[k]}' 
-                                            for k in ('mode', 'multi_line_fields', 
+                                            for k in ('mode', 'multi_line_fields', 'col_row_fields',
                                                         'filter', 'best_at_max', 
                                                         'best_ref_x_fields', 'best_ref_metric_field', 
                                                         'best_ref_ml_fields') if pcfg[k]]),
@@ -319,7 +320,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         if has_cbar:
             norm_df = best_df[best_df.index.get_level_values('metric')==metrics[-1]]
             if pcfg['ax_style'].pop('zscale', [{}])[0]=='log':
-                pcfg['line_style']['norm'] = colors.LogNorm(norm_df['metric_value'].min(), norm_df['metric_value'].max())
+                pcfg['line_style']['norm'] = colors.LogNorm(norm_df['metric_value'].min()+1e-15, norm_df['metric_value'].max())
+                best_df[best_df.index.get_level_values('metric')==metrics[-1]] += 1e-15
             else:
                 pcfg['line_style']['norm'] = colors.Normalize(norm_df['metric_value'].min(), norm_df['metric_value'].max())    
             pcfg['line_style']['cmap'] = 'magma' if pcfg['colors'][0]=='default' else pcfg['colors'][0]
@@ -368,7 +370,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                     # set line style
                     for stp, s in zip(style_types, st):
                         pcfg['line_style'][stp] = s
-                        
+                    
                     ax = ax_draw(ax, p_df, 
                                 label=legend,
                                 **pcfg['line_style'])

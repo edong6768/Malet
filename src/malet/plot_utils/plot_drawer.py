@@ -28,7 +28,7 @@ def ax_draw_curve(ax: Axes,
     y_field = list(df)[0]
     
     x_values, metric_values = map(np.array, zip(*dict(df[y_field]).items()))
-    assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
+    assert not isinstance(metric_values[0], pd.Series), f'y_field should have only {1} values for each index.'
     
     if len(x_values)>100:
         marker = None
@@ -106,7 +106,7 @@ def ax_draw_best_stared_curve(ax: Axes,
     y_field = list(df)[0]
     
     x_values, metric_values = map(np.array, zip(*dict(df[y_field]).items()))
-    assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
+    assert not isinstance(metric_values[0], pd.Series), f'y_field should have only {1} values for each index.'
     
     if len(x_values)>100:
         marker = None
@@ -184,7 +184,7 @@ def ax_draw_bar(ax: Axes,
     y_field = list(df)[0]
     
     x_values, metric_values = map(np.array, zip(*dict(df[y_field]).items()))
-    assert not isinstance(metric_values[0], pd.Series), 'y_field should have only 1 values for each index.'
+    assert not isinstance(metric_values[0], pd.Series), f'y_field should have only {1} values for each index.'
     
     tick_values = np.arange(len(x_values))
     ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
@@ -274,7 +274,7 @@ def ax_draw_scatter(ax: Axes,
     """
     Draws scatter of two arbitrary y_fields.
     """
-    assert len(set(df.index.get_level_values('metric')))==2, 'There should be only {2} metrics in the dataframe.'
+    assert len(set(df.index.get_level_values('metric')))==2, f'There should be {2} metrics in the dataframe, got {set(df.index.get_level_values("metric"))}.'
     assert set(df.index.get_level_values('metric'))==set(y_fields), 'y_fields should be the same as metrics in the dataframe.' 
     
     df = df.reset_index(['total_steps', 'step'], drop=True)
@@ -288,7 +288,7 @@ def ax_draw_scatter(ax: Axes,
     
     y1, y2 = map(lambda y: list(df[y]), y_fields)
     
-    ax.scatter(y1, y2, color=color, marker=marker, s=markersize*8, edgecolors='black')
+    ax.scatter(y1, y2, color=color, marker=marker, s=markersize*20, edgecolors='black')
     
     return ax
 
@@ -307,7 +307,7 @@ def ax_draw_scatter_heat(ax: Axes,
     """
     Draws scatter with colors of three arbitrary y_fields.
     """
-    assert len(set(df.index.get_level_values('metric')))==3, 'There should be only {3} metrics in the dataframe.'
+    assert len(set(df.index.get_level_values('metric')))==3, f'There should be {3} metrics in the dataframe, got {set(df.index.get_level_values("metric"))}.'
     assert set(df.index.get_level_values('metric'))==set(y_fields), 'y_fields should be the same as metrics in the dataframe.' 
     
     df = df.reset_index(['total_steps', 'step'], drop=True)
@@ -323,6 +323,6 @@ def ax_draw_scatter_heat(ax: Axes,
     
     y1, y2, y3 = map(lambda y: list(df[y]), y_fields)
     
-    ax.scatter(y1, y2, c=y3, marker=marker, s=markersize*4, norm=norm, cmap=cmap)
+    ax.scatter(y1, y2, c=y3, marker=marker, s=markersize*20, norm=norm, cmap=cmap)
     
     return ax
