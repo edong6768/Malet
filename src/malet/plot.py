@@ -280,7 +280,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 Align(
                     Columns(
                         [Panel('\n'.join([f'- {k:{max(map(len, specified_field))}s} : {best_df.index.get_level_values(k)[0]}' for k in sorted(specified_field)]), padding=(1, 3)),
-                        df2richtable(show_df)]
+                        df2richtable(show_df, max=50)]
                     ), align='center'
                 )
             )
@@ -289,6 +289,9 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 best_df = select_df(best_df, {'metric': metrics})
             
             ############################# Plot #############################
+            
+            status.update('Prepare plot...')
+            status.start()
             
             pford = pcfg['field_orders']
             pford = {fk: fvs for fk, *fvs in map(lambda od: re.split('(?<!,) ', od.strip()), pford.split('/')) if fk} # split ' ' except ', '
@@ -357,6 +360,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 axs = np.array([[axs]])
             for _ in range(2-len(axs.shape)):
                 axs = axs[None]
+                
+            status.stop()
             with Progress() as progress:
                 total_prgs, init_prgs = len(ani_vs)*len(col_vs)*len(row_vs)*len(mlines), 0
                 task = progress.add_task(f"[green]Drawing plot... [{init_prgs}/{total_prgs}]", total=total_prgs)
@@ -460,7 +465,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             
             ax.legend(handles=legendlines, labels=legendlabels, **legend_style, #**pcfg['ax_style'].pop('legend', [{}])[0], 
                         ncol=len(pmlf) if is_wide else 1, columnspacing=0.8, handlelength=None if len(pmlf)==1 else 1.5)
-
+        
         return best_df, fig, ani_artists, save_name
     
 

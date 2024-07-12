@@ -18,16 +18,24 @@ def create_dir(dir):
     os.makedirs(dir)
     
 
-def df2richtable(df, title=None):
-  table = Table(title=title)
+def df2richtable(df, title=None, max=None):
   df = df.reset_index()
   
+  if max:
+    df_tail = str(len(df)), *map(str, df.tail(1).iloc[0].values)
+    df = df.head(max)
+  
+  table = Table(title=title)
   table.add_column('id')
   for f in list(df):       
     table.add_column(f)
   
   for row in df.itertuples(name=None):
-    table.add_row(*(str(i) for i in row))
+    table.add_row(*map(str, row))
+    
+  if max:
+    table.add_row('...', *(['...']*len(df.columns)))
+    table.add_row(*df_tail)
     
   return table
 
