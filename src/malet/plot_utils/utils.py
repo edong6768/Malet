@@ -12,19 +12,7 @@ def create_dir(dir):
         os.remove(os.path.join(dir, f))
   else:
     os.makedirs(dir)
-
-def save_figure(fig, save_dir, save_name, png=False):
-    fig.tight_layout()
-    if not os.path.exists(save_dir):
-        create_dir(save_dir)
-    save_path = os.path.join(save_dir, save_name + '.pdf')
-    fig.savefig(save_path, format='pdf')
-
-    if png:
-        png_save_dir = save_path.replace('/pdf', '/png')
-        if not os.path.exists(png_save_dir):
-            create_dir(png_save_dir)
-        fig.savefig(os.path.join(png_save_dir, save_name + '.png'), bbox_inches='tight', format='png')
+    
       
 def merge_dict(base: dict, other: dict):
     """Merge plot_config dict (priority: ``base``)"""

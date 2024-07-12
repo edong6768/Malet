@@ -41,30 +41,40 @@ def ax_draw_curve(ax: Axes,
     
     tick_values = x_values
     
+    artists = []
+    
     if len(tick_values)==1:
-        ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
+        artists.append(
+            ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
+        )
         if f'{y_field}_std' in df:
             metric_std = float(df[f'{y_field}_std'])
-            ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
+            artists.append(
+                ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
+            )
 
     else:
         if unif_xticks:
             tick_values = np.arange(len(x_values))
             ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
             
-        ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
-                marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
+        artists += ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
+                            marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
         
         if len(x_values)%markevery!=0:
-            ax.plot(tick_values[-1], metric_values[-1], color=color, marker=marker, markersize=markersize)
+            artists += ax.plot(tick_values[-1], metric_values[-1], color=color, marker=marker, markersize=markersize)
         
         if f'{y_field}_std' in df:
             x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
             
             if std_plot=='bar':
-                ax.errorbar(tick_values, metric_values, yerr=metric_std, color=color, elinewidth=3)
+                artists.append(
+                    ax.errorbar(tick_values, metric_values, yerr=metric_std, color=color, elinewidth=3)
+                )
             elif std_plot=='fill':
-                ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
+                artists.append(
+                    ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
+                )
                 
         if annotate:
             assert not (f:=set(annotate_field) - (a:=set(df) - {'total_steps', 'step', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
@@ -76,11 +86,13 @@ def ax_draw_curve(ax: Axes,
                 if i%markevery and i!=len(x_values)-1: continue
                 txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else ''), str(x)]
                                 +[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
-                ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+                artists.append(
+                    ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+                )
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
 
-    return ax
+    return artists
 
 def ax_draw_best_stared_curve(ax: Axes,
                   df: pd.DataFrame,
@@ -119,11 +131,17 @@ def ax_draw_best_stared_curve(ax: Axes,
     
     tick_values = x_values
     
+    artists = []
+    
     if len(tick_values)==1:
-        ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
+        artists.append(
+            ax.axhline(metric_values, linewidth=linewidth, color=color, label=label)
+        )
         if f'{y_field}_std' in df:
             metric_std = float(df[f'{y_field}_std'])
-            ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
+            artists.append(
+                ax.axhspan(metric_values[0] + metric_std, metric_values[0] - metric_std, alpha=0.3, color=color)
+            )
 
     else:
         if unif_xticks:
@@ -135,19 +153,23 @@ def ax_draw_best_stared_curve(ax: Axes,
             x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
             
             if std_plot=='bar':
-                ax.errorbar(tick_values, metric_values, yerr=metric_std, color=color, elinewidth=3)
+                artists.append(
+                    ax.errorbar(tick_values, metric_values, yerr=metric_std, color=color, elinewidth=3)
+                )
             elif std_plot=='fill':
-                ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
+                artists.append(
+                    ax.fill_between(tick_values, metric_values + metric_std, metric_values - metric_std, alpha=0.3, color=color)
+                )
                 
         best_idx = list(metric_values).index((max if best_at_max else min)(metric_values))
         for i, (_,y,t) in enumerate(zip(x_values, metric_values, tick_values)):
             if i%markevery: continue
             if i==best_idx:
-                ax.plot(tick_values[i], metric_values[i], color='green', 
-                        marker='*', markersize=markersize+10)
+                artists += ax.plot(tick_values[i], metric_values[i], color='green', 
+                                   marker='*', markersize=markersize+10)
             else:
-                ax.plot(tick_values[i], metric_values[i], color=color, 
-                        marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
+                artists += ax.plot(tick_values[i], metric_values[i], color=color, 
+                                   marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
                 
                 
         if annotate:
@@ -160,11 +182,13 @@ def ax_draw_best_stared_curve(ax: Axes,
                 if i%markevery: continue
                 txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else ''), str(x)]
                                 +[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
-                ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+                artists.append(
+                    ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+                )
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
 
-    return ax
+    return artists
 
 
 def ax_draw_bar(ax: Axes,
@@ -189,11 +213,17 @@ def ax_draw_bar(ax: Axes,
     tick_values = np.arange(len(x_values))
     ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
 
+    artists = []
+    
     if std_plot and f'{y_field}_std' in df:
         x_values, metric_std = map(np.array, zip(*dict(df[f'{y_field}_std']).items()))
-        ax.bar(tick_values, metric_values, yerr=metric_std, label=label, color=color)
+        artists.append(
+            ax.bar(tick_values, metric_values, yerr=metric_std, label=label, color=color)
+        )
     else:
-        ax.bar(tick_values, metric_values, label=label, color=color)
+        artists.append(
+            ax.bar(tick_values, metric_values, label=label, color=color)
+        )
         
     if annotate:
         assert not (f:=set(annotate_field) - (a:=set(df) - {'total_steps', 'step', y_field, f'{y_field}_std'})), f'Annotation field: {f} are not in dataframe field: {a}'
@@ -204,11 +234,13 @@ def ax_draw_bar(ax: Axes,
         for x,y,t in zip(x_values, metric_values, tick_values):
             txt = '\n'.join([f'{y:.5f}'+(f'$\pm${metric_std[i]:.5f}' if (f'{y_field}_std' in df and pd.notna(metric_std[i])) else '')]
                             +['' if unif_xticks else str(x)]+[f'{i}={df.loc[x][j]}' for i, j in zip(abv_annot, annotate_field)])
-            ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+            artists.append(
+                ax.annotate(txt, (t,y), textcoords="offset points", xytext=(0,10), ha='center')
+            )
     
     ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
 
-    return ax
+    return artists
 
 
 def ax_draw_heatmap(ax: Axes,
@@ -227,11 +259,14 @@ def ax_draw_heatmap(ax: Axes,
     y_field_df = df.drop(columns=list(df)[1:])
     
     x_fields = y_field_df.index.names
-    grid_df = (y_field_df
-                .reset_index()
-                .pivot(index=x_fields[1], columns=x_fields[0])
-               )
-    ax.pcolor(grid_df, cmap=cmap, edgecolors='w', norm=norm)
+    grid_df = (
+        y_field_df.reset_index()
+                  .pivot(index=x_fields[1], columns=x_fields[0])
+    )
+    
+    artists = [
+        ax.pcolor(grid_df, cmap=cmap, edgecolors='w', norm=norm)
+    ]
     
     *x_values, = map(lambda l: sorted(set(y_field_df.index.get_level_values(l))), x_fields)
     ax.set_xticks(np.arange(0.5, len(x_values[0]), 1), x_values[0], fontsize=10, rotation=45)
@@ -246,20 +281,22 @@ def ax_draw_heatmap(ax: Axes,
         
         if f'{y_field}_std' in df:
             y_std_df = df.drop(columns=list(set(df)-{f'{y_field}_std'}))
-            std_grid_df = (y_std_df
-                            .reset_index()
-                            .pivot(index=x_fields[1], columns=x_fields[0])
-                          )
+            std_grid_df = (
+                y_std_df.reset_index()
+                        .pivot(index=x_fields[1], columns=x_fields[0])
+            )
             
         for i, (mtc, x) in enumerate([*grid_df]):
             for j, y in enumerate([*grid_df.index.get_level_values(0)]):
                 txt = '\n'.join([f'{grid_df.loc[y, (mtc, x)]:.5f}'
                                  +(f'\n$\pm${std_grid_df.loc[y, (f"{mtc}_std", x)]:.5f}' if (f'{y_field}_std' in df and pd.notna(std_grid_df.loc[y, (f'{mtc}_std', x)])) else '')]
                                  +[f'{i}={df.loc[(x, y), j]}' for i, j in zip(abv_annot, annotate_field) if df.index.isin([(x, y)]).any()])
-                ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
+                artists.append(
+                    ax.text(i+0.5, j+0.5, txt, c='dimgrey', ha='center', va='center', weight='bold')
+                )
     
     # ax.tick_params(axis='both', which='major', labelsize=17, direction='in', length=5)
-    return ax
+    return artists
 
 
 
@@ -288,9 +325,11 @@ def ax_draw_scatter(ax: Axes,
     
     y1, y2 = map(lambda y: list(df[y]), y_fields)
     
-    ax.scatter(y1, y2, color=color, marker=marker, s=markersize*20, edgecolors='black')
+    artists = [
+        ax.scatter(y1, y2, color=color, marker=marker, s=markersize*20, edgecolors='black')
+    ]
     
-    return ax
+    return artists
 
     
 
@@ -323,6 +362,8 @@ def ax_draw_scatter_heat(ax: Axes,
     
     y1, y2, y3 = map(lambda y: list(df[y]), y_fields)
     
-    ax.scatter(y1, y2, c=y3, marker=marker, s=markersize*20, norm=norm, cmap=cmap)
+    artists = [
+        ax.scatter(y1, y2, c=y3, marker=marker, s=markersize*20, norm=norm, cmap=cmap)
+    ]
     
     return ax
