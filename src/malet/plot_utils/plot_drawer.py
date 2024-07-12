@@ -366,4 +366,4 @@ def ax_draw_scatter_heat(ax: Axes,
         ax.scatter(y1, y2, c=y3, marker=marker, s=markersize*20, norm=norm, cmap=cmap)
     ]
     
-    return ax
+    return artists

@@ -155,8 +155,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             #--- melt and explode metric in log.df
             if 'metric' not in x_fields+pmlf+pcrf:
                 log.df = log.df.drop(list(set(log.df)-{*metrics, pcfg['best_ref_metric_field']}), axis=1)
-            df = log.melt_and_explode_metric(step=None if (('step' in [*x_fields, pani]) or (pflt.get('step')!='last')) else -1,
-                                            dropna=(mode not in {'scatter', 'scatter_heat'}))
+            df = log.melt_and_explode_metric(step=None if (('step' in {*x_fields, pani}) or (pflt.get('step', 'last')!='last')) else -1,
+                                             dropna=(mode not in {'scatter', 'scatter_heat'}))
             
             assert not df.empty, f'Metrics {metrics}' +\
                 (f' and best_ref_metric_field {pcfg["best_ref_metric_field"]} are' if pcfg["best_ref_metric_field"] else ' is') +\
@@ -357,31 +357,6 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 axs = np.array([[axs]])
             for _ in range(2-len(axs.shape)):
                 axs = axs[None]
-                
-            if has_cbar:
-                c_cmap, c_norm = (pcfg['line_style'].pop(k) for k in ['cmap', 'norm'])
-                
-                for ax in axs[:, -1]: ax.remove()
-                cax = fig.add_subplot(axs[0, 0].get_gridspec()[:, -1])
-                cbar = fig.colorbar(cm.ScalarMappable(norm=c_norm, cmap=c_cmap), cax=cax)
-                cbar.ax.tick_params(labelsize=pcfg['font_size'])
-                
-                z_label = pcfg['zlabel'] or metrics[-1].replace('_', ' ').capitalize()
-                cbar.ax.set_ylabel(z_label, fontsize=pcfg['font_size'])
-            
-            # add a big axis, hide frame, tick, and tick label
-            big_ax = fig.add_subplot(111, frameon=False)
-            big_ax.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
-            
-            # set title and x, y axis labels
-            if (title:=pcfg.get('title')):
-                big_ax.set_title(title, fontsize=pcfg['font_size'])
-            
-            x_label= pcfg['xlabel'] or x_label
-            y_label= pcfg['ylabel'] or y_label
-            fig.supxlabel(x_label, fontsize=pcfg['font_size'])
-            fig.supylabel(y_label, fontsize=pcfg['font_size'])
-                
             with Progress() as progress:
                 total_prgs, init_prgs = len(ani_vs)*len(col_vs)*len(row_vs)*len(mlines), 0
                 task = progress.add_task(f"[green]Drawing plot... [{init_prgs}/{total_prgs}]", total=total_prgs)
@@ -429,15 +404,39 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
 
                             ax_styler(ax, **pcfg['ax_style'])
                         
-                        
+        
+        if has_cbar:
+            c_cmap, c_norm = (pcfg['line_style'].pop(k) for k in ['cmap', 'norm'])
             
-            if len(pcrf)>0:
-                for ci, col_v in enumerate(col_vs):
-                    ax = axs[-1, ci]
-                    ax.set_xlabel(f'{pcrf[0]}={col_v}', size=pcfg['font_size'])
-            if len(pcrf)>1:
-                for ri, row_v in enumerate(row_vs[::-1]):
-                    axs[ri, 0].set_ylabel(f'{pcrf[1]}={row_v}', size=pcfg['font_size'])
+            for ax in axs[:, -1]: ax.remove()
+            cax = fig.add_subplot(axs[0, 0].get_gridspec()[:, -1])
+            cbar = fig.colorbar(cm.ScalarMappable(norm=c_norm, cmap=c_cmap), cax=cax)
+            cbar.ax.tick_params(labelsize=pcfg['font_size'])
+            
+            z_label = pcfg['zlabel'] or metrics[-1].replace('_', ' ').capitalize()
+            cbar.ax.set_ylabel(z_label, fontsize=pcfg['font_size'])
+        
+        # add a big axis, hide frame, tick, and tick label
+        big_ax = fig.add_subplot(111, frameon=False)
+        big_ax.tick_params(labelcolor='none', which='both', top=False, bottom=False, left=False, right=False)
+        
+        # set title and x, y axis labels
+        if (title:=pcfg.get('title')):
+            big_ax.set_title(title, fontsize=pcfg['font_size'])
+        
+        x_label= pcfg['xlabel'] or x_label
+        y_label= pcfg['ylabel'] or y_label
+        fig.supxlabel(x_label, fontsize=pcfg['font_size'])
+        fig.supylabel(y_label, fontsize=pcfg['font_size'])
+            
+        
+        if len(pcrf)>0:
+            for ci, col_v in enumerate(col_vs):
+                ax = axs[-1, ci]
+                ax.set_xlabel(f'{pcrf[0]}={col_v}', size=pcfg['font_size'])
+        if len(pcrf)>1:
+            for ri, row_v in enumerate(row_vs[::-1]):
+                axs[ri, 0].set_ylabel(f'{pcrf[1]}={row_v}', size=pcfg['font_size'])
                     
             
         # set legend, improve later
