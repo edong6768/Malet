@@ -135,15 +135,15 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             
             post_melt_k = {'step', 'total_steps', 'metric'}
             assert all(x in log.df.index.names for x in x_fields if x not in post_melt_k), \
-                f'X-field {[x for x in x_fields if x not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+                f'X-field {[x for x in x_fields if x not in log.df.index.names]} not in log. Choose between {set(log.df.index.names)|post_melt_k}'
             assert all(kk in log.df.index.names for k in pflt.keys() if (kk:=k[:-1] if '!' in k else k) not in post_melt_k), \
-                f'Filter keys {[k for k in pflt.keys() if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+                f'Filter keys {[k for k in pflt.keys() if k not in log.df.index.names]} not in log. Choose between {set(log.df.index.names)|post_melt_k}'
             assert all(k in log.df.index.names for k in pcrf if k not in post_melt_k), \
-                f'Column-row fields {[k for k in pcrf if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+                f'Column-row fields {[k for k in pcrf if k not in log.df.index.names]} not in log. Choose between {set(log.df.index.names)|post_melt_k}'
             assert all(k in log.df.index.names for k in pmlf if k not in post_melt_k), \
-                f'Multi-line (style) fields {[k for k in pmlf if k not in log.df.index.names]} not in log. Choose between {list(log.df.index.names)}'
+                f'Multi-line (style) fields {[k for k in pmlf if k not in log.df.index.names]} not in log. Choose between {set(log.df.index.names)|post_melt_k}'
             assert not pani or pani in {*log.df.index.names} | post_melt_k, \
-                f'Animate field {pani} not in log. Choose between {list(log.df.index.names)}'
+                f'Animate field {pani} not in log. Choose between {set(log.df.index.names)|post_melt_k}'
             assert all(m in log.df for m in metrics), \
                 f'Metric {[m for m in metrics if m not in log.df]} not in log. Choose between {list(log.df)}'
             
