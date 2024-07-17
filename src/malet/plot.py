@@ -71,7 +71,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         x_fields = xs if ['']!=(xs:=x_fields.split(' ')) else []
         metrics = metrics.split(' ')
         
-        pflt, pcrf, pmlf, pani = map(pcfg.get, ['filter', 'col_row_fields', 'multi_line_fields', 'animation_field'])
+        pflt, pcrf, pmlf, pani = map(pcfg.get, ['filter', 'multi_plot_fields', 'multi_line_fields', 'animation_field'])
         pflt = {fk: fvs for fk, *fvs in map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split(' / ')) if fk} # split ' ' except ', '
         
         #---Set default pmlf
@@ -186,7 +186,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
                 Align(
                     Columns(
                         [Panel('\n'.join([f'- {k}: {pcfg[k]}' 
-                                                for k in ('mode', 'multi_line_fields', 'col_row_fields',
+                                                for k in ('mode', 'multi_line_fields', 'multi_plot_fields',
                                                             'filter', 'best_at_max', 
                                                             'best_ref_x_fields', 'best_ref_metric_field', 
                                                             'best_ref_ml_fields') if pcfg[k]]),
