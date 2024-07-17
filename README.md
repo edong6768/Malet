@@ -184,10 +184,10 @@ This can be done using the following arguments.
     -filter '{field1} {v1} {v2} / {field2} {v3} {v4} ...'
     ```
 
-    Here,
+    Here, two special fields are automatically generated:
 
-    - `epoch` - from `explode`ing list-type metric
-    - `metric` - from `melt`ing different metrics column name into a new column
+    - `step` - from `explode`ing list-type metric, with special value 'best' and 'last' for selecting best performing step and last step respectively and with slicing syntax (e.g., 50:100),
+    - `metric` - from `melt`ing different metrics column name into a new column.
 
     are automatically generated.
 
@@ -197,7 +197,20 @@ This can be done using the following arguments.
     -multi_line_field '{field1} {field2} ...'
     ```
 
-4. **`-best_at_max`** (Default: False): Specify whether chosen metric is best when largest (e.g. accuracy).
+4. **`-multi_plot_fields`**: Specify the fields to plot multiple plot (column/row) over.
+
+    ```bash
+    -multi_plot_field '{column field}'
+    -multi_plot_field '{column field} {row field}'
+    ```
+
+4. **`-animate_field`**: Specify the fields to animate over. Saves gif intead of pdf.
+
+    ```bash
+    -animate_field '{field}'
+    ```
+
+6. **`-best_at_max`** (Default: False): Specify whether chosen metric is best when largest (e.g. accuracy).
 
     ```bash
     -best_at_max
@@ -206,10 +219,10 @@ This can be done using the following arguments.
 
 #### Styling arguments
 
-1. **`-colors`**: There are two color mode `''`, `'cont'`, where one uses rainbow like colors and the other uses more continuous colors.
+1. **`-colors`**: Name or list of names of [matplotlib colormaps](https://matplotlib.org/stable/users/explain/colors/colormaps.html).
 
     ```bash
-    -colors 'cont'
+    -colors 'default'
     ```
 
 2. **`-annotate`**: Option to add annotation based on field specified in `annotate_fields`.
