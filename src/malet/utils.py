@@ -3,6 +3,15 @@ from typing import Optional
 from ast import literal_eval
 from contextlib import ContextDecorator
 
+import traceback, time
+from multiprocessing import TimeoutError as MpTimeoutError
+from queue import Empty as Queue_Empty
+from queue import Queue
+from _thread import start_new_thread
+from ctypes import c_long
+from ctypes import py_object
+from ctypes import pythonapi
+
 from absl import logging
 
 from rich.table import Table
@@ -33,7 +42,7 @@ def df2richtable(df, title=None, max=None):
   for row in df.itertuples(name=None):
     table.add_row(*map(str, row))
     
-  if max:
+  if max and max<len(df):
     table.add_row('...', *(['...']*len(df.columns)))
     table.add_row(*df_tail)
     
@@ -166,3 +175,70 @@ class QueuedFileLock(ContextDecorator):
     
   def __del__(self):
     self.release(force=True)
+
+
+
+class FuncTimeoutError(Exception):
+    pass
+
+def async_raise(tid, exctype=Exception):
+    """
+    Raise an Exception in the Thread with id `tid`. Perform cleanup if
+    needed.
+    Based on Killable Threads By Tomer Filiba
+    from http://tomerfiliba.com/recipes/Thread2/
+    license: public domain.
+    """
+    assert isinstance(tid, int), 'Invalid  thread id: must an integer'
+
+    tid = c_long(tid)
+    exception = py_object(exctype)
+    res = pythonapi.PyThreadState_SetAsyncExc(tid, exception)
+    if res == 0:
+        raise ValueError('Invalid thread id.')
+    elif res != 1:
+        # if it returns a number greater than one, you're in trouble,
+        # and you should call it again with exc=NULL to revert the effect
+        pythonapi.PyThreadState_SetAsyncExc(tid, 0)
+        raise SystemError('PyThreadState_SetAsyncExc failed.')
+
+
+def settimeout_func(func, timeout=3*24*60*60):
+    if timeout is None: return func
+    
+    def timeoutfunc(*args, **kwargs):
+      """
+      Threads-based interruptible runner, but is not reliable and works
+      only if everything is pickable.
+      """
+      # We run `func` in a thread and block on a queue until timeout
+      q = Queue()
+
+      def runner():
+          try:
+              _res = func(*(args or ()), **(kwargs or {}))
+              q.put((None, _res))
+          except FuncTimeoutError:
+              # rasied by async_rasie to kill the orphan threads
+              pass
+          except Exception as ex:
+              q.put((ex, None))
+
+      tid = start_new_thread(runner, ())
+
+      try:
+          err, res = q.get(timeout=timeout)
+          if err:
+              raise err
+          return res
+      except (Queue_Empty, MpTimeoutError):
+          raise FuncTimeoutError(
+                  "{0} timeout (taking more than {1} sec)".format(func.__name__, timeout)
+              )
+      finally:
+          try:
+              async_raise(tid, FuncTimeoutError)
+          except (SystemExit, ValueError):
+              pass
+    
+    return timeoutfunc

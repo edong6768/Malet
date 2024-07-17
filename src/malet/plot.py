@@ -72,7 +72,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
         metrics = metrics.split(' ')
         
         pflt, pcrf, pmlf, pani = map(pcfg.get, ['filter', 'col_row_fields', 'multi_line_fields', 'animation_field'])
-        pflt = {fk: fvs for fk, *fvs in map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split('/')) if fk} # split ' ' except ', '
+        pflt = {fk: fvs for fk, *fvs in map(lambda flt: re.split('(?<!,) ', flt.strip()), pflt.split(' / ')) if fk} # split ' ' except ', '
         
         #---Set default pmlf
         if not pmlf:
@@ -294,7 +294,7 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             status.start()
             
             pford = pcfg['field_orders']
-            pford = {fk: fvs for fk, *fvs in map(lambda od: re.split('(?<!,) ', od.strip()), pford.split('/')) if fk} # split ' ' except ', '
+            pford = {fk: fvs for fk, *fvs in map(lambda od: re.split('(?<!,) ', od.strip()), pford.split(' / ')) if fk} # split ' ' except ', '
             assert not (nmtch:={k: (set(v), set(best_df.index.get_level_values(k))) for k, v in pford.items() if set(v)!=set(best_df.index.get_level_values(k))}), \
                 f'Field order does not match with the dataframe: {nmtch} (field_order, dataframe)'
             
@@ -345,8 +345,8 @@ def draw_metric(tsv_file, plot_config, save_name='', preprcs_df=lambda *x: x):
             
             rep, skp, sft = map(int, pcfg['colors_rep_skip_shift'])
             style_dict = {'color': [c for i, c in enumerate(sum(map(sns.color_palette, [None if c=='default' else c for c in pcfg['colors']]), [])*rep) if not (i-sft)%(skp+1)],
-                        'marker': ['D', 'o', '>', 'X', 's', 'v', '^', '<', 'p', 'P', '*', '+', 'x', 'h', 'H', '|', '_'],
-                        'linestyle': ['-', ':', '-.', '--']*3}
+                          'marker': ['D', 'o', '>', 'X', 's', 'v', '^', '<', 'p', 'P', '*', '+', 'x', 'h', 'H', '|', '_'],
+                          'linestyle': ['-', ':', '-.', '--']*3}
             styles = [*product(*[[*style_dict[s]][:len(set(k))] for s, k in zip(style_types, map(df.index.get_level_values, pmlf))])]
             
             
@@ -512,6 +512,7 @@ def run(argv, preprcs_df):
     
     assert plot_config['mode'].split('-')[0] in {'curve', 'curve_best', 'bar', 'heatmap', 'scatter', 'scatter_heat'}, f'Mode: {plot_config["mode"]} does not exist.'
     df, fig, ani_artists, save_name = draw_metric(tsv_file, plot_config, preprcs_df=preprcs_df)
+    save_name = save_name.replace('/', '_')
     fig.tight_layout()
 
     # save figure and dataframe

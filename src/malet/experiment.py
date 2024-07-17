@@ -1,7 +1,7 @@
 import os, glob, shutil, io
 import copy
-import yaml
-import re
+import yaml, re
+import traceback
 from functools import reduce, partial
 from typing import Optional, ClassVar, Callable, Union, TypeVar
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ from rich.progress import track
 from absl import logging
 from ml_collections.config_dict import ConfigDict
 
-from .utils import list2tuple, str2value, QueuedFileLock
+from .utils import list2tuple, str2value, QueuedFileLock, FuncTimeoutError, settimeout_func
 
 Self = TypeVar("Self", bound="Experiment")
 ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, Self], dict]]
@@ -580,7 +580,8 @@ class Experiment:
                auto_update_tsv: bool = False,
                configs_save: bool = False,
                checkpoint: bool = False,
-               filelock: bool = False
+               filelock: bool = False,
+               timeout: Optional[float] = None
     ):
     
     if checkpoint:
@@ -591,6 +592,7 @@ class Experiment:
     self.configs_save = configs_save
     self.checkpoint = checkpoint
     self.filelock = filelock
+    self.timeout = timeout
     
     do_split = isinstance(total_splits, int) and total_splits>1 or isinstance(total_splits, str)
     cfg_file, tsv_file, _ = self.get_paths(exp_folder_path, split=curr_split if do_split else None)
@@ -684,10 +686,12 @@ class Experiment:
                         **self.__curr_runinfo.update_and_get(),
                         status=status)
     self.log.to_tsv()
-    
-    
+  
+  
   def run(self):
     logging.info('Start running experiments.')
+    
+    start_t = datetime.now()
     
     if self.filelock:
       logging.info(self.log.filelock.is_locked)
@@ -722,18 +726,25 @@ class Experiment:
 
 
         try:
+          exp_func = self.exp_func
+          if self.timeout:
+            exp_func = settimeout_func(exp_func, timeout = self.timeout - (datetime.now()-start_t).total_seconds())
           if self.checkpoint:
-            metric_dict = self.exp_func(config, self)
+            metric_dict = exp_func(config, self)
           else:
-            metric_dict = self.exp_func(config)
+            metric_dict = exp_func(config)
           status = self.__COMPLETED
-          
-        except:
+        
+        except Exception as exc:
           metric_dict, _ = self.get_metric_info(config)
           status = self.__FAILED
-          logging.error("Experiment failure occured.")
-          raise
-        
+          
+          if isinstance(exc, FuncTimeoutError):
+            logging.error(f"Experiment timeout ({self.timeout}s) occured:")
+            raise exc
+          else:
+            logging.error(f"Experiment failure occured:\n{traceback.format_exc()}{exc}")
+            
         finally:
           self.update_log(config, **metric_dict, status=status)
           logging.info("Saved experiment data to log.")
