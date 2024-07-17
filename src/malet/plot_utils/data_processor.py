@@ -22,25 +22,6 @@ def select_df(df, filt_dict, *exclude_fields, equal=True, drop=False):
         
     return df
 
-    # for i, k in enumerate(filt_keys):
-    #     has_none = any(map(pd.isnull, nest(filt_dict[k])))
-    #     values = [*filter(pd.notnull, nest(filt_dict[k]))]
-        
-    #     assert not (v:=set(values)-(vs:=set(df.index.get_level_values(k).dropna()))), f"Values {v} are not in field '{k}': {sorted(vs)}"
-    #     fltr = df.index.get_level_values(k).isin(values)
-    #     sel_df = df.loc[fltr if equal else ~fltr]
-        
-    #     if has_none:
-    #         assert df.reset_index(k).isnull().any().any(), f"Field '{k}' has no None value."
-    #         sel_df = pd.concat([sel_df, df.loc[df.index.get_level_values(k).isnull()]])
-            
-    #     assert not sel_df.empty, f"Filter {k}:{values} return empty dataframe. Inspect {dict((k, filt_dict[k]) for k in filt_keys[:i+1])}" 
-    
-    # if drop:
-    #     sel_df = sel_df.reset_index([*filt_keys], drop=True)
-        
-    # return sel_df
-
 
 def homogenize_df(df, ref_df, filt_dict, *exclude_fields):
     """Homogenize index values of ``df`` with reference to ``select_df(ref_df, filt_dict)``."""
