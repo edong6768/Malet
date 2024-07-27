@@ -39,6 +39,7 @@ dependencies = [
 
 [project.scripts]
 malet-plot = "malet.plot:main"
+malet-merge = "malet.merge_log:main"
 
 [project.urls]
 Repository = "https://github.com/edong6768/Malet.git"

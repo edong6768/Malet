@@ -29,6 +29,7 @@ def create_dir(dir):
 
 def df2richtable(df, title=None, max=None):
   df = df.reset_index()
+  df_len = len(df)
   
   if max:
     df_tail = str(len(df)), *map(str, df.tail(1).iloc[0].values)
@@ -41,9 +42,11 @@ def df2richtable(df, title=None, max=None):
   
   for row in df.itertuples(name=None):
     table.add_row(*map(str, row))
-    
-  if max and max<len(df):
+  
+  if max and max<df_len:
+    table.add_row('', *(['']*len(df.columns)))
     table.add_row('...', *(['...']*len(df.columns)))
+    table.add_row('', *(['']*len(df.columns)))
     table.add_row(*df_tail)
     
   return table
@@ -242,3 +245,18 @@ def settimeout_func(func, timeout=3*24*60*60):
               pass
     
     return timeoutfunc
+  
+def path_common_decomposition(paths):
+  if len(paths) == 0: return '', []
+  elif len(paths) == 1: return paths[0], []
+  
+  paths = [p.split('/') for p in paths]
+  
+  # Find common prefix
+  common = []
+  for _ in range(min(map(len, paths))):
+    if len(set(p[0] for p in paths)) != 1: break
+    common.append(paths[0][0])
+    paths = [p[1:] for p in paths]
+  non_common = [os.path.join(*p) for p in paths]
+  return common, non_common

@@ -3,7 +3,7 @@ import copy
 import yaml, re
 import traceback
 from functools import reduce, partial
-from typing import Optional, ClassVar, Callable, Union, TypeVar
+from typing import Optional, ClassVar, Callable, Union, Tuple, List, Dict, Any, Mapping
 from dataclasses import dataclass
 from itertools import product, chain
 from datetime import datetime
@@ -12,61 +12,81 @@ from git import Repo
 
 import pandas as pd
 import numpy as np
+
+from rich import print
 from rich.progress import track
+from rich.table import Table
+from rich.panel import Panel
+from rich.align import Align
 
 from absl import logging
 from ml_collections.config_dict import ConfigDict
 
-from .utils import list2tuple, str2value, QueuedFileLock, FuncTimeoutError, settimeout_func
+from .utils import list2tuple, str2value, QueuedFileLock, FuncTimeoutError, settimeout_func, path_common_decomposition
 
-Self = TypeVar("Self", bound="Experiment")
-ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, Self], dict]]
+ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, 'Experiment'], dict]]
 
 class ConfigIter:
-  '''
-  Iterator of configs generated from yaml config generator file
-  Generates grid of configs from given experiment plans in yaml.
+  '''Iterator of ConfigDict generated from yaml config grid plan file.
+  
+  Usage example:
+    ```python
+    for config in ConfigIter('exp_file.yaml'):
+      train_func(config)
+    ```
     
-  [yaml exp_file example]
-   model: ResNet32
-   dataset: cifar10
-   ...
-   grid:
-     - optimizer: [sgd]
-       group:
-         pai_type: [[random], [snip]]
-         pai_scope: [[local], [global]]
-       rho: [0.05]
-       seed: [1, 2, 3]
-     - optimizer: [sam]
-       pai_type: [random, snip, lth]
-       pai_sparsity: [0, 0.9, 0.95, 0.98, 0.99]
-       rho: [0.05, 0.1, 0.2, 0.3]
-       seed : [1, 2, 3]
+  yaml exp_file example:
+  
+    ```yaml
+    model: ResNet32
+    dataset: cifar10
+    ...
+    grid:
+      - optimizer: [sgd]
+        group:
+          pai_type: [[random], [snip]]
+          pai_scope: [[local], [global]]
+        rho: [0.05]
+        seed: [1, 2, 3]
+      - optimizer: [sam]
+        pai_type: [random, snip, lth]
+        pai_sparsity: [0, 0.9, 0.95, 0.98, 0.99]
+        rho: [0.05, 0.1, 0.2, 0.3]
+        seed : [1, 2, 3]
+    ```
+    
+  Attributes:
+      static_configs (dict): Dictionary of static configs of the experiment.
+      grid_fields (list): List of grid fields indicating order of griding.
+      grid (dict): List of grid values.
+      grid_iter (list): List of ConfigDicts generated from grid values.
   '''
   
   def __init__(self, exp_config_path):
     with open(exp_config_path) as f:
       cnfg_str = self.__sub_cmd(f.read())
-      self.grid_fields = self.__extract_grid_order(cnfg_str)
-      self.raw_config = yaml.safe_load(cnfg_str)
+      
+    self.static_configs = yaml.safe_load(cnfg_str)
     
-    self.name = os.path.split(exp_config_path)[0].split('/')[-1]
-    self.grid = self.raw_config.get('grid', {})
-    self.static_configs = {k:self.raw_config[k] for k in set(self.raw_config)-{'grid_fields', 'grid'}}
+    self.grid_fields = self.__extract_grid_order(cnfg_str)
+    self.grid = self.static_configs.pop('grid', {})
     
     assert not (f:={k for k in self.static_configs.keys() if k in self.grid_fields}), f'Overlapping fields {f} in Static configs and grid fields.'
   
     self.grid_iter = self.__get_iter()
     
   
-  def filter_iter(self, filt_fn):
-    """filters ConfigIter with ``filt_fn`` which has (idx, dict) as arguments"""
+  def filter_iter(self, filt_fn: Callable[[int, dict], bool]):
+    """filters ConfigIter with ``filt_fn`` which has (idx, dict) as arguments.
+
+    Args:
+        filt_fn (Callable[[int, dict], bool]): Filter function to filter ConfigIter.
+    """
     self.grid_iter = [d for i, d in enumerate(self.grid_iter) if filt_fn(i, d)]
     
   @property
   def grid_dict(self):
-    """dictionary of all grid values"""
+    """Dictionary of all grid values"""
     if not self.grid_fields: return dict()
     st, *sts = self.grid
     castl2t = lambda vs: map(lambda v: (tuple(v) if isinstance(v, list) else v), vs)
@@ -75,8 +95,15 @@ class ConfigIter:
     grid_dict = {k: [*map(self.field_type(k), vs)] for k, vs in reduce(acc, sts, st).items()}
     return grid_dict
   
-  def field_type(self, field):
-    """Returns type of a field"""
+  def field_type(self, field: str):
+    """Returns type of a field in grid.
+
+    Args:
+        field (str): Name of the field.
+
+    Returns:
+        Any: Type of the field.
+    """
     return type(self[0][field])
   
   @staticmethod
@@ -97,7 +124,7 @@ class ConfigIter:
     
   @staticmethod
   def __extract_grid_order(cfg_str):
-    """parse grid order from raw config string"""
+    """Parse grid order from raw config string"""
     if 'grid' not in cfg_str: return []
     
     grid = re.split('grid ?:', cfg_str)[1]
@@ -168,52 +195,137 @@ pd.DataFrame.drop = lambda self, *_, axis=0, **__: pd.DataFrame(columns=self.col
 
 @dataclass
 class ExperimentLog:
+  """Logging class for experiment results.
+
+  Attributes:
+      df (pd.DataFrame): DataFrame of experiment results.
+      static_configs (dict): Dictionary of static configs of the experiment.
+      logs_file (str): File path to tsv file.
+      use_filelock (bool, optional): Whether to use file lock for reading/writing log file. Defaults to False.
+  """
+  df: pd.DataFrame
   static_configs: dict
-  grid_fields: list
   logs_file: str
-  
-  metric_fields: Optional[list] = None
-  df: Optional[pd.DataFrame]=None
-  auto_update_tsv: bool = False
   use_filelock: bool = False
   
   __sep: ClassVar[str] = '-'*45 + '\n'
   
   def __post_init__(self):
-    if self.df is None:
-      assert self.metric_fields is not None, 'Specify the metric fields of the experiment.'
-      assert not (f:=set(self.grid_fields) & set(self.metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
-      self.df = pd.DataFrame(columns=self.grid_fields+self.metric_fields).set_index(self.grid_fields)
-
-    else:
-      self.metric_fields = list(self.df)
-    
     if self.use_filelock:
       self.filelock = QueuedFileLock(self.logs_file+'.lock', timeout=3*60*60)
+      
+  
+  @property
+  def grid_fields(self): return list(self.df.index.names) if self.df.index.names!=[None] else []
+  
+  @property
+  def metric_fields(self): return list(self.df)
   
   # Constructors.
   # -----------------------------------------------------------------------------  
+  
   @classmethod
-  def from_exp_config(cls, exp_config, logs_file: str, metric_fields: Optional[list]=None, auto_update_tsv: bool=False, use_filelock: bool=False):
-    return cls(*(exp_config[k] for k in ['static_configs', 'grid_fields']), logs_file=logs_file,
-               metric_fields=metric_fields, auto_update_tsv = auto_update_tsv, use_filelock=use_filelock)
+  def from_fields(
+        cls, 
+        grid_fields: list, 
+        metric_fields: list, 
+        static_configs: dict, 
+        logs_file: str,
+        use_filelock: bool=False
+    )->'ExperimentLog':
+    """Create ExperimentLog from grid and metric fields.
+
+    Args:
+        grid_fields (list): Field names of configs to be grid-searched.
+        metric_fields (list): Field names of metrics to be logged from experiment results.
+        static_configs (dict): Other static configs of the experiment.
+        logs_file (str): File path to tsv file.
+        use_filelock (bool, optional): Whether to use file lock for reading/writing log file. Defaults to False.
+
+    Returns:
+        ExperimentLog: New experiment log object.
+    """
+    assert metric_fields is not None, 'Specify the metric fields of the experiment.'
+    assert not (f:=set(grid_fields) & set(metric_fields)), f'Overlapping field names {f} in grid_fields and metric_fields. Remove one of them.'
+    return cls(pd.DataFrame(columns=grid_fields+metric_fields).set_index(grid_fields), 
+               static_configs, 
+               logs_file=logs_file, 
+               use_filelock=use_filelock)
+  
+  @classmethod
+  def from_config_iter(
+        cls, 
+        config_iter: ConfigIter, 
+        metric_fields: list,
+        logs_file: str, 
+        use_filelock: bool=False
+    )->'ExperimentLog':
+    """Create ExperimentLog from ConfigIter object.
+
+    Args:
+        config_iter (ConfigIter): ConfigIter object to reference static_configs and grid_fields.
+        metric_fields (list): List of metric fields.
+        logs_file (str): File path to tsv file.
+        use_filelock (bool, optional): Whether to use file lock for reading/writing log file. Defaults to False.
+
+    Returns:
+        ExperimentLog: New experiment log object.
+    """
+    return cls.from_fields(config_iter.grid_fields, 
+                           metric_fields, 
+                           config_iter.static_configs, 
+                           logs_file, 
+                           use_filelock=use_filelock)
 
   @classmethod
-  def from_tsv(cls, logs_file: str, parse_str=True, auto_update_tsv: bool=False, use_filelock: bool=False):
-    '''open tsv with yaml header'''
+  def from_tsv(
+        cls, 
+        logs_file: str, 
+        use_filelock: bool=False,
+        parse_str=True
+    )->'ExperimentLog':
+    """Create ExperimentLog from tsv file with yaml header.
+
+    Args:
+        logs_file (str): File path to tsv file.
+        use_filelock (bool, optional): Whether to use file lock for reading/writing log file. Defaults to False.
+        parse_str (bool, optional): Whether to parse and cast string into speculated type. Defaults to True.
+
+    Returns:
+        ExperimentLog: New experiment log object.
+    """
     if use_filelock:
       with QueuedFileLock(logs_file+'.lock', timeout=3*60*60):
-        log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv, use_filelock=use_filelock)
+        logs = cls.parse_tsv(logs_file, parse_str=parse_str)
     else:
-      log = cls(**cls.parse_tsv(logs_file, parse_str=parse_str), logs_file=logs_file, auto_update_tsv=auto_update_tsv, use_filelock=use_filelock)
-    return log
+      logs = cls.parse_tsv(logs_file, parse_str=parse_str)
+      
+    return cls(logs['df'], 
+               logs['static_configs'],
+               logs_file, 
+               use_filelock=use_filelock)
   
   
   # tsv handlers.
   # -----------------------------------------------------------------------------
   @classmethod
-  def parse_tsv(cls, log_file: str, parse_str=True):
-    '''parses tsv file into usable datas'''
+  def parse_tsv(cls, log_file: str, parse_str=True)->dict:
+    """Parse tsv file into usable datas.
+    
+    Parse tsv file generated by ExperimentLog.to_tsv method.
+    Has static_config as yaml header, and DataFrame as tsv body
+    where multiindices is set as different line with column names.
+
+    Args:
+        log_file (str): File path to tsv file.
+        parse_str (bool, optional): Whether to parse and cast string into speculated type. Defaults to True.
+
+    Raises:
+        Exception: Error while reading log file.
+
+    Returns:
+        dict: Dictionary of pandas.DataFrame, grid_fields, metric_fields, and static_configs.
+    """
     assert os.path.exists(log_file), f'File path "{log_file}" does not exists.'
 
     try:
@@ -251,10 +363,10 @@ class ExperimentLog:
     # set grid_fields to multiindex
     df = df.set_index(idx[1:])
       
-    return {'static_configs': static_configs,
+    return {'df': df,
             'grid_fields': idx[1:],
             'metric_fields': col,
-            'df': df}
+            'static_configs': static_configs}
   
   
   def lock_file(func):
@@ -269,15 +381,26 @@ class ExperimentLog:
   
   @lock_file
   def load_tsv(self, logs_file=None, parse_str=True):
-    '''load tsv with yaml header'''
+    """load tsv with yaml header into ExperimentLog object.
+
+    Args:
+        logs_file (Optional[str], optional): Specify other file path to tsv file. Defaults to None.
+        parse_str (bool, optional): Whether to parse and cast string into speculated type. Defaults to True.
+    """
     if logs_file is not None:
       self.logs_file=logs_file
     
-    for k, v in self.parse_tsv(self.logs_file, parse_str=parse_str).items():
-      self.__dict__[k] = v
+    logs = self.parse_tsv(self.logs_file, parse_str=parse_str)
+    self.df = logs['df']
+    self.static_configs = logs['static_configs']
 
   @lock_file
   def to_tsv(self, logs_file=None):
+    """Write ExperimentLog object to tsv file with yaml header.
+
+    Args:
+        logs_file (Optional[str], optional): Specify other file path to tsv file. Defaults to None.
+    """
     logs_file = self.logs_file if logs_file==None else logs_file
     
     logs_path, _ = os.path.split(logs_file)
@@ -302,23 +425,17 @@ class ExperimentLog:
       yaml.dump(self.static_configs, fd)
       fd.write(self.__sep)
       fd.write(tsv_str)
-      
-  
-  def update_tsv(func, mode='rw'):
-    '''Decorator for read/write tsv before/after given function call'''
-    def wrapped(self, *args, **kwargs):
-      if self.auto_update_tsv and 'r' in mode: self.load_tsv(self.logs_file)
-      ret = func(self, *args, **kwargs)
-      if self.auto_update_tsv and 'w' in mode: self.to_tsv()
-      return ret
-    return wrapped
   
   # Add results.
   # -----------------------------------------------------------------------------
   
-  @partial(update_tsv, mode='r')
-  def add_result(self, configs, **metrics):
-    '''Add experiment run result to dataframe'''
+  def add_result(self, configs: Mapping[str, Any], **metrics):
+    """Add experiment run result to dataframe.
+    
+    Args:
+        configs (Mapping[str, Any]): Dictionary or Mapping of configurations of the result of the experiment instance to add.
+        **metrics (Any): Metrics of the result of the experiment instance to add.
+    """
     if configs in self:
       cur_gridval = list2tuple([configs[k] for k in self.grid_fields])
       self.df = self.df.drop(cur_gridval)
@@ -329,22 +446,10 @@ class ExperimentLog:
     result_df = pd.DataFrame(result_dict).set_index(self.grid_fields)
     self.df = pd.concat([self.df, result_df])[self.metric_fields]
     
-    # Dataframe.loc based code
-    # problem: pandas unable to distinguish between 
-    #              ``.loc[(col_idx, row_idx)]`` and ``.loc[(multi_idx_1, multi_idx_2)]``
-    #          for 2-level multiindex dataframe
-    """
-    cur_gridval = list2tuple([configs[k] for k in self.grid_fields])
-    
-    df_row = [metrics.get(k) for k in self.field_order]
-      
-    # Write over metric results if there is a config saved
-    if configs in self:
-      self.df = self.df.drop(cur_gridval)
-    
-    self.df.loc[cur_gridval] = df_row
-    """
-    
+
+  # Field manipulations.
+  # -----------------------------------------------------------------------------
+
   @staticmethod
   def __add_column(df, new_column_name, fn, *fn_arg_fields):
     '''Add new column field computed from existing fields in self.df'''
@@ -355,91 +460,285 @@ class ExperimentLog:
     df[new_column_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
     return df
 
-  def add_computed_metric(self, new_metric_name, fn, *fn_arg_fields):
-    '''Add new metric computed from existing metrics in self.df'''
+  def add_computed_metric(self, new_metric_name: str, fn: Callable, *fn_arg_fields: str):
+    """Add new metric computed from existing metrics in self.df.
+
+    Args:
+        new_metric_name (str): Name of the new metric field.
+        fn (Callable): Function to compute new metric field.
+        *fn_arg_fields (str): Field names to be used as arguments for the function.
+    """
     self.df = self.__add_column(self.df, new_metric_name, fn, *fn_arg_fields)
-    self.metric_fields.append(new_metric_name)
     
-  def add_derived_index(self, new_index_name, fn, *fn_arg_fields):
-    '''Add new index field computed from existing fields in self.df'''
+  def add_derived_index(self, new_index_name: str, fn: Callable, *fn_arg_fields: str):
+    """Add new index field computed from existing fields in self.df.
+
+    Args:
+        new_index_name (str): Name of the new grid field.
+        fn (Callable): Function to compute new index field.
+        *fn_arg_fields (str): Field names to be used as arguments for the function.
+    """
     df = self.df.reset_index(self.grid_fields)
     df = self.__add_column(df, new_index_name, fn, *fn_arg_fields)
-    self.grid_fields.append(new_index_name)
-    self.df = df.set_index(self.grid_fields)
+    self.df = df.set_index([*self.grid_fields, new_index_name])
     
-  def remove_metric(self, *metric_names):
-    self.df = self.df.drop(columns=[*metric_names])
-    self.metric_fields = [m for m in self.grid_fields if m not in metric_names]
+  def remove_fields(self, field_names: List[str]):
+    """Remove fields from the log.
+
+    Args:
+        field_names (List[str]): List of field names to remove.
+    """
+    assert not (ns:=set(field_names)-set(list(self.static_configs)+self.grid_fields+self.metric_fields)), \
+      f'Field names {ns} not in any of static {list(self.static_configs)}, grid {self.grid_fields}, or metric {self.metric_fields} field names.'
     
-  def remove_index(self, *field_names):
-    self.df = self.df.reset_index([*field_names], drop=True)
-    self.grid_fields = [f for f in self.grid_fields if f not in field_names]
+    grid_ns, metric_ns = [], [] 
+    for fn in field_names:
+      if fn in self.static_configs:
+        del(self.static_configs[fn])                    # remove static fields
+      elif fn in self.grid_fields:
+        grid_ns.append(fn)
+      elif fn in self.metric_fields:
+        metric_ns.append(fn)
+    
+    self.df = self.df.reset_index(grid_ns, drop=True)   # remove grid field
+    self.df = self.df.drop(columns=metric_ns)           # remove metric field
+
+  def rename_fields(self, name_map: Dict[str, str]):
+    """Rename fields in the log.
+
+    Args:
+        name_map (Dict[str, str]): Mapping of old field names to new field names.
+    """
+    assert not (ns:=set(name_map)-set(list(self.static_configs)+self.grid_fields+self.metric_fields)), \
+      f'Field names {ns} not in any of static {list(self.static_configs)}, grid {self.grid_fields}, or metric {self.metric_fields} field names.'
+    
+    grid_l, metric_d = self.grid_fields, {}
+    for on, nn in name_map.items():
+      if on in self.static_configs:
+        self.static_configs[nn] = self.static_configs.pop(on)   # update static field name
+      elif on in self.grid_fields:
+        grid_l[grid_l.index(on)] = nn
+      elif on in self.metric_fields:
+        metric_d[on] = nn
+
+    self.df.index.rename(grid_l, inplace=True)                  # update grid field names
+    self.df.rename(columns=metric_d, inplace=True)              # update metric field names
+
 
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
+  
+  def log_conflict_resolver(self, other: 'ExperimentLog')->Tuple['ExperimentLog', 'ExperimentLog']:
+    """Summarize conflicts and accept user input for resolution.
+
+    Args:
+        other (ExperimentLog): Target log to merge with self.
+        
+    Returns:
+        Tuple[ExperimentLog, ExperimentLog]: Resolved logs (self, other).
+    """
+    if self==other: return self, other
+    print(f'\nConflict detected between logs: ')
+    print(f'  - Self :{self.logs_file}')
+    print(f'  - Other:{other.logs_file}')
+    print('Start resolving conflict...')
+    
+    self_d, other_d = {}, {}
+    
+    for log, d in [(self, self_d), (other, other_d)]:
+      d['sttc_d'] = log.static_configs
+      d['grid_d'] = {k: sorted(set(log.df.index.get_level_values(k))) for k in log.grid_fields}
+      d['dict'] = {**d['sttc_d'], **d['grid_d']}
+      d['fields'] = list(log.static_configs.keys()) + list(log.grid_fields)
+      
+    sfs, sfo = map(lambda d: set(d['fields']), (self_d, other_d))
+    same_fields = sorted(sfs & sfo)
+    new_to_self = sorted(sfo - sfs)
+    new_to_othr = sorted(sfs - sfo)
+    
+    ln_k = max([len(k) for k in same_fields+new_to_self+new_to_othr])
+    ln_s = max([len(str(self_d['dict'].get(k, ""))) for k in same_fields+new_to_self+new_to_othr])
+    ln_o = max([len(str(other_d['dict'].get(k, ""))) for k in same_fields+new_to_self+new_to_othr])
+    
+    ############################# Print conflict summary #############################
+    
+    _, (self_post, othr_post) = path_common_decomposition([self.logs_file, other.logs_file])
+    
+    summary_tab = Table(title='Log field conflict summary')
+    
+    summary_tab.add_column('Field', style='bold')
+    summary_tab.add_column(f'[blue]Self[/blue] ({self_post[:-4]})')
+    summary_tab.add_column(f'[green]Other[/green] ({othr_post[:-4]})')
+      
+    for i, k in enumerate(same_fields):
+      summary_tab.add_row(f'{k:{ln_k}s}', 
+                          f'{str(self_d["dict"].get(k, "")):{ln_s}s}', 
+                          f'{str(other_d["dict"].get(k, "")):{ln_o}s}', 
+                          style="on bright_black" if i%2 else "", 
+                          end_section=(i==len(same_fields)-1))
+
+    rd = lambda s, i: f'[on {"red" if i%2 else "dark_red"}]{s} [/on {"red" if i%2 else "dark_red"}]'
+    for i, k in enumerate(new_to_self):
+      i += len(same_fields)
+      summary_tab.add_row(f'{k:{ln_k}s}', 
+                       rd(f'{str(self_d["dict"].get(k, "")):{ln_s}s}', i), 
+                          f'{str(other_d["dict"].get(k, "")):{ln_o}s}', 
+                          style="on bright_black" if i%2 else "", 
+                          end_section=(i==len(same_fields)+len(new_to_self)-1))
+      
+    for i, k in enumerate(new_to_othr):
+      i += len(same_fields) + len(new_to_self)
+      summary_tab.add_row(f'{k:{ln_k}s}', 
+                          f'{str(self_d["dict"].get(k, "")):{ln_s}s}', 
+                       rd(f'{str(other_d["dict"].get(k, "")):{ln_o}s}', i), 
+                          style="on bright_black" if i%2 else "")
+      
+    print(Align(summary_tab, align='center'))
+    print(Align(Panel(f'Detected [bold red]{len(new_to_self+new_to_othr)}[/bold red] conflicts to resolve.', padding=(1, 3)), align='center'))
+    
+    
+    ############################# Resolve conflicts #############################
+    
+    i_cfl, n_cfl = 0, len(new_to_self+new_to_othr)
+    logs = [
+      (self,  f'[blue]{self_post[:-4]}[/blue]',  self_d,  new_to_self),
+      (other, f'[green]{othr_post[:-4]}[/green]', other_d, new_to_othr)
+    ]
+    
+    # resolve conflict for each log
+    for i in (False, True):
+      tlog, ts, td, ntt = logs[i]
+      flog, fs, fd, ntf = logs[not i]
+
+      if ntt:
+        print(f'\n[bold][Handle missing fields in {ts}][/bold] (Default: same/first value of {fs})')
+        for k in ntt:
+          i_cfl += 1
+          print(f'│\n├─[{i_cfl}/{n_cfl}] [bold]({k})[/bold]')
+          # set default value
+          dflt = False
+          dflt_val = fd['dict'].get(k, "")
+          if k in fd['grid_d']: # set list to single value if it is in grid_fields
+            dflt_val = dflt_val[0] if len(dflt_val)>0 else None
+          
+          # choose mode
+          modes = ['Add new value']
+          if ntf               : modes.append('merge with existing field')
+          if k in fd['sttc_d'] : modes.append('remove')
+          
+          mode = 0
+          if len(modes)>1:
+            print(f"│  Choose process mode ({' / '.join([f'{i}: {md}' for i, md in enumerate(modes)])} / else: set value to {dflt_val})")
+            mode = str2value(input("│  ↳ "))
+
+          # process for each modes
+          if isinstance(mode, int):
+            if modes[mode]=='Add new value':
+              print(f"│   ({mode}) Add new value ({fs} {'=' if k in fd['sttc_d'] else 'in'} {fd['dict'].get(k, '')})")
+              new_val = str2value(input(f"│   ↳ "))
+              if new_val:
+                tlog.static_configs[k] = new_val
+                print(f'│   - Set to {new_val}')
+              else: dflt = True
+            elif modes[mode]=='merge with existing field':
+              print(f'│   ({mode}) Merge with existing field in {ts}: {ntf}')
+              while True:
+                new_field = input(f"│   ↳ ")
+                if new_field in ntf+['']: break
+                print(f"│   There is no field:{new_field} to merge with. Choose from {ntf}")
+              if new_field:
+                flog.rename_fields({k: new_field})
+                ntf.remove(new_field)
+                n_cfl -= 1
+                print(f'│   - Merged with {new_field}')
+              else: dflt=True
+            elif modes[mode]=='remove':
+              print(f'│   ({mode}) Remove field')
+              del(flog.static_configs[k])
+            else: dflt = True
+          else: dflt = True
+
+          if dflt:
+            print(f'│   - Set to {dflt_val}')
+            tlog.static_configs[k] = str2value(dflt_val)
+            
+        print(f'│\n└─[[bold cyan]Done[/bold cyan]]')
+        
+
+    return self, other
+    
+  
   def __merge_one(self, other, same=True):
     '''
     Merge two logs into self.
-    - The order of grid_fields follows self.
-    - Difference between static_configs are moved to grid_fields.
-    - If grid_fields are different between self & other
-       - If it exists in static_configs, they are moved to grid_fields.
-       - else it is filled with np.nan
+    - The order of grid_fields follows self
+    - Static fields stays only if they are same for both logs.
+    - else move to grid_fields if not in grid_fields
     '''
     if same:
       assert self==other, 'Different experiments cannot be merged by default.'
+ 
+    # new static_field: field in both log.static_field and have same value
+    sc1, sc2 = (log.static_configs for log in (self, other))
+    new_sttc = {k: sc1[k] for k in set(sc1)&set(sc2) if sc1[k]==sc2[k]}
+    new_gridf = self.grid_fields + list(set(sc1)-set(new_sttc))
+    new_mtrcf = self.metric_fields + [k for k in other.metric_fields if k not in self.metric_fields]
 
-    # find different fixed configs
-    def same_diff(dictl, dictr):
-      keys = set(dictl.keys()) & set(dictr.keys())
-      same, diff = dict(), []
-      for k in keys:
-        if dictl[k]==dictr[k]: same[k]=dictl[k]
-        else: diff.append(k)
-      return same, diff
-    
-    new_sttc, diff_sttc = same_diff(self.static_configs, other.static_configs)
+    # field static->grid: if not in new static_field and not in grid
+    dfs = []
+    for log in (self, other):
+      dfs.append(log.df.reset_index())
+      for k in set(log.static_configs)-set(new_sttc):
+        if k in log.grid_fields: continue
+        dfs[-1][k] = [list2tuple(log.static_configs.get(k, np.nan))]*len(log)
 
-    # find new grid_fields
-    new_to_self_sf = [sf for sf in other.grid_fields if sf not in self.grid_fields] + diff_sttc
-    new_to_othr_sf = [sf for sf in self.grid_fields if sf not in other.grid_fields] + diff_sttc
-
-    # fill in new grid_fields in each df from static_configs and configs
-    # change list configs to tuple for hashablilty
-    for sf in new_to_self_sf:
-      self.df[sf] = [list2tuple(self.static_configs.get(sf, np.nan))]*len(self)
-
-    for sf in new_to_othr_sf:
-      other.df[sf] = [list2tuple(other.static_configs.get(sf, np.nan))]*len(other)
-
+    # merge and update self
     self.static_configs = new_sttc
-    self.grid_fields += new_to_self_sf
-    
-    self.df, other.df = (obj.df.reset_index() for obj in (self, other))
-    self.df = pd.concat([self.df, other.df]) \
-                .set_index(self.grid_fields)[self.metric_fields]
-    
-    return self
+    self.df = (
+        pd.concat(dfs)
+          .set_index(new_gridf)[new_mtrcf]
+    )
 
+    return self
+    
   def merge(self, *others, same=True):
-    '''Merge multiple logs into self'''
+    """Merge multiple logs into self.
+
+    Args:
+        *others (ExperimentLog): Logs to merge with self.
+        same (bool, optional): Whether to raise error when logs are not of matching experiments. Defaults to True.
+    """
     for other in others:
+      self, other = self.log_conflict_resolver(other)
       self.__merge_one(other, same=same)
 
   @staticmethod
-  def merge_tsv(*names, logs_path, save_path=None, same=True):
-    if save_path is None:
-      save_path = os.path.join(logs_path, 'log_merged.tsv')
-    base, *logs = [ExperimentLog.from_tsv(os.path.join(logs_path, n+'.tsv'), parse_str=False) for n in names]
+  def merge_tsv(*log_files, save_path, same=True):
+    """Merge multiple logs into one from tsv file paths.
+
+    Args:
+        *logs_path (str): Path to logs.
+        save_path (str): Path to save merged log.
+        same (bool, optional): Whether to raise error when logs are not of matching experiments. Defaults to True.
+    """
+    base, *logs = [ExperimentLog.from_tsv(f, parse_str=False) for f in log_files]
     base.merge(*logs, same=same)
     base.to_tsv(save_path)
 
   @staticmethod
-  def merge_folder(logs_path, save_path=None, same=True):
-    """change later if we start saving tsvs to other directories"""
-    os.chdir(logs_path)
-    logs = [f[:-4] for f in glob.glob("*.tsv")]
-    ExperimentLog.merge_tsv(*logs, logs_path=logs_path, save_path=save_path, same=same)
+  def merge_folder(logs_path: str, save_path: Optional[str]=None, same: bool=True):
+    """Merge multiple logs into one from tsv files in folder.
+
+    Args:
+        logs_path (str): Folder path to logs.
+        save_path (Optional[str], optional): Path to save merged log. Defaults to None.
+        same (bool, optional): Whether to raise error when logs are not of matching experiments. Defaults to True.
+    """
+    log_files = glob.glob(os.path.join(logs_path, "*.tsv"))
+    assert log_files, f'No tsv files found in {logs_path}'
+    
+    save_path = save_path or os.path.join(logs_path, 'log_merged.tsv')
+    ExperimentLog.merge_tsv(*log_files, save_path=save_path, same=same)
     
   
   # Utilities.
@@ -454,9 +753,15 @@ class ExperimentLog:
     return self.df[grid_filt]
   
   
-  @partial(update_tsv, mode='r')
-  def isin(self, config):
-    '''Check if specific experiment config was already executed in log.'''
+  def isin(self, config: Optional[Mapping[str, Any]])->bool:
+    """Check if specific experiment config was already executed in log.
+
+    Args:
+        config (Optional[Mapping[str, Any]]): Configuration instance to check if it is in the log.
+
+    Returns:
+        bool: Whether the config is in the log.
+    """
     if self.df.empty: return False
 
     cfg_same_in_static = all([config[k]==v for k, v in self.static_configs.items() if k in config])
@@ -465,21 +770,49 @@ class ExperimentLog:
     return cfg_same_in_static and not cfg_matched_df.empty
 
 
-  def get_metric(self, config):
-    '''Search matching log with given config dict and return metric_dict, info_dict'''
+  def get_metric(self, config: Optional[Mapping[str, Any]])->dict:
+    """Search matching log with given config dict and return metric_dict, info_dict.
+
+    Args:
+        config (Optional[Mapping[str, Any]]): Configuration instance to search in the log.
+
+    Returns:
+        dict: Found metric dictionary of the given config.
+    """
     assert config in self, 'config should be in self when using get_metric_dict.'
     
     cfg_matched_df = self.__cfg_match_row(config)
     metric_dict = {k:(v.iloc[0] if not (v:=cfg_matched_df[k]).empty else None) for k in self.metric_fields}
     return metric_dict
 
-  def is_same_exp(self, other):
-    '''Check if both logs have same config fields.'''
+  def is_same_exp(self, other: 'ExperimentLog')->bool:
+    """Check if both logs have same config fields.
+
+    Args:
+        other (ExperimentLog): Log to compare with.
+
+    Returns:
+        bool: Whether both logs have same config fields.
+    """
     fields = lambda log: set(log.static_configs.keys()) | set(log.grid_fields)
     return fields(self)==fields(other)
     
     
-  def melt_and_explode_metric(self, df=None, step=None, dropna=True):
+  def melt_and_explode_metric(self, df: Optional[pd.DataFrame]=None, step: Optional[int]=None, dropna: bool=True)->pd.DataFrame:
+    """Melt and explode metric values in DataFrame.
+    
+    Melt column (metric) names into 'metric' field (multi-index) and their values into 'metric_value' columns.
+    Explode metric with list of values into multiple rows with new 'step' and 'total_steps' field.
+    If step is specified, only that step is selected, otherwise all steps are exploded.
+    
+    Args:
+        df (Optional[pd.DataFrame], optional): Base DataFrame to operate over. Defaults to None.
+        step (Optional[int], optional): Specific step to select. Defaults to None.
+        dropna (bool, optional): Whether to drop rows with NaN metric values. Defaults to True.
+
+    Returns:
+        pd.DataFrame: Melted and exploded DataFrame.
+    """
     if df is None: 
       df = self.df
     mov_to_index = lambda *fields: df.reset_index().set_index((dn if (dn:=df.index.names)!=[None] else [])+[*fields])
@@ -507,8 +840,9 @@ class ExperimentLog:
     if dropna:
       df = (
         df[pd.to_numeric(df['metric_value'], errors='coerce').notnull()]
-        .dropna()
-        .astype('float'))
+          .dropna()
+          .astype('float')
+      )
     return df
 
     
@@ -577,7 +911,6 @@ class Experiment:
                exp_metrics: Optional[list] = None,
                total_splits: Union[int, str] = 1, 
                curr_split: Union[int, str] = 0,
-               auto_update_tsv: bool = False,
                configs_save: bool = False,
                checkpoint: bool = False,
                filelock: bool = False,
@@ -585,7 +918,7 @@ class Experiment:
     ):
     
     if checkpoint:
-      assert auto_update_tsv, "argument 'auto_update_tsv' should be set to True when checkpointing."
+      assert filelock, "argument 'filelock' should be set to True when checkpointing."
     
     self.exp_func = exp_function
 
@@ -598,7 +931,7 @@ class Experiment:
     cfg_file, tsv_file, _ = self.get_paths(exp_folder_path, split=curr_split if do_split else None)
     
     self.configs = self.__get_and_split_configs(cfg_file, total_splits, curr_split)
-    self.log = self.__get_log(tsv_file, self.infos+exp_metrics, auto_update_tsv, filelock)
+    self.log = self.__get_log(tsv_file, self.infos+exp_metrics, filelock)
     
     self.__check_matching_static_configs()
     
@@ -627,17 +960,16 @@ class Experiment:
     
     return configiter
       
-  def __get_log(self, logs_file, metric_fields=None, auto_update_tsv=False, filelock=False):
+  def __get_log(self, logs_file, metric_fields=None, filelock=False):
     # Configure experiment log
     if os.path.exists(logs_file): # Check if there already is a file
-      log = ExperimentLog.from_tsv(logs_file, auto_update_tsv=auto_update_tsv, use_filelock=filelock) # resumes automatically
+      log = ExperimentLog.from_tsv(logs_file, use_filelock=filelock) # resumes automatically
       
     else: # Create new log
       logs_path, _ = os.path.split(logs_file)
       if not os.path.exists(logs_path):
         os.makedirs(logs_path)
-      log = ExperimentLog.from_exp_config(self.configs.__dict__, logs_file,
-                                          metric_fields=metric_fields, auto_update_tsv=auto_update_tsv, use_filelock=filelock)
+      log = ExperimentLog.from_config_iter(self.configs, metric_fields, logs_file, use_filelock=filelock)
       log.to_tsv()
       
     return log
@@ -700,7 +1032,7 @@ class Experiment:
       self.log.filelock.acquire()
       self.log.load_tsv()
       
-    # check for left-over experiments (100 times for now)
+    # check for left-over experiments (10 times for now)
     for _ in range(10):
       # run experiment plans 
       for i, config in enumerate(self.configs):
