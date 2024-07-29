@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 import os, glob, shutil, io
 import copy
 import yaml, re
 import traceback
 from functools import reduce, partial
-from typing import ClassVar, Any
-from collections.abc import Mapping, Callable
+from typing import ClassVar, Any, Mapping, Callable, Optional, Union, Tuple, List, Dict
 from dataclasses import dataclass
 from itertools import product, chain
 from datetime import datetime, timedelta
@@ -26,7 +23,7 @@ from ml_collections.config_dict import ConfigDict
 
 from .utils import list2tuple, str2value, QueuedFileLock, FuncTimeoutError, settimeout_func, path_common_decomposition
 
-ExpFunc = Callable[[ConfigDict], dict] | Callable[[ConfigDict, 'Experiment'], dict]
+ExpFunc = Union[Callable[[ConfigDict], dict], Callable[[ConfigDict, 'Experiment'], dict]]
 
 class ConfigIter:
   '''Iterator of ConfigDict generated from yaml config grid plan file.
@@ -64,7 +61,7 @@ class ConfigIter:
       grid_iter (list): list of ConfigDicts generated from grid values.
   '''
   
-  def __init__(self, exp_config_path):
+  def __init__(self, exp_config_path: str):
     with open(exp_config_path) as f:
       cnfg_str = self.__sub_cmd(f.read())
       
@@ -87,7 +84,7 @@ class ConfigIter:
     self.grid_iter = [d for i, d in enumerate(self.grid_iter) if filt_fn(i, d)]
     
   @property
-  def grid_dict(self)->dict:
+  def grid_dict(self) -> dict:
     """Dictionary of all grid values"""
     if not self.grid_fields: return dict()
     st, *sts = self.grid
@@ -125,7 +122,7 @@ class ConfigIter:
     return cfg_str
     
   @staticmethod
-  def __extract_grid_order(cfg_str)->list[str]:
+  def __extract_grid_order(cfg_str) -> List[str]:
     """Parse grid order from raw config string"""
     if 'grid' not in cfg_str: return []
     
@@ -241,7 +238,7 @@ class ExperimentLog:
         static_configs: dict, 
         logs_file: str,
         use_filelock: bool = False
-    ) -> ExperimentLog:
+    ) -> 'ExperimentLog':
     """Create ExperimentLog from grid and metric fields.
 
     Args:
@@ -268,7 +265,7 @@ class ExperimentLog:
         metric_fields: list,
         logs_file: str, 
         use_filelock: bool = False
-    ) -> ExperimentLog:
+    ) -> 'ExperimentLog':
     """Create ExperimentLog from ConfigIter object.
 
     Args:
@@ -292,7 +289,7 @@ class ExperimentLog:
         logs_file: str, 
         use_filelock: bool = False,
         parse_str = True
-    ) -> ExperimentLog:
+    ) -> 'ExperimentLog':
     """Create ExperimentLog from tsv file with yaml header.
 
     Args:
@@ -388,11 +385,11 @@ class ExperimentLog:
     return wrapped
   
   @lock_file
-  def load_tsv(self, logs_file: str|None=None, parse_str: bool=True):
+  def load_tsv(self, logs_file: Optional[str]=None, parse_str: bool=True):
     """load tsv with yaml header into ExperimentLog object.
 
     Args:
-        logs_file (str | None, optional): Specify other file path to tsv file. Defaults to None.
+        logs_file (Optional[str], optional): Specify other file path to tsv file. Defaults to None.
         parse_str (bool, optional): Whether to parse and cast string into speculated type. Defaults to True.
     """
     if logs_file is not None:
@@ -403,11 +400,11 @@ class ExperimentLog:
     self.static_configs = logs['static_configs']
 
   @lock_file
-  def to_tsv(self, logs_file: str|None=None):
+  def to_tsv(self, logs_file: Optional[str]=None):
     """Write ExperimentLog object to tsv file with yaml header.
 
     Args:
-        logs_file (str | None, optional): Specify other file path to tsv file. Defaults to None.
+        logs_file (Optional[str], optional): Specify other file path to tsv file. Defaults to None.
     """
     logs_file = self.logs_file if logs_file==None else logs_file
     
@@ -490,11 +487,11 @@ class ExperimentLog:
     df = self.__add_column(df, new_index_name, fn, *fn_arg_fields)
     self.df = df.set_index([*self.grid_fields, new_index_name])
     
-  def remove_fields(self, field_names: list[str]):
+  def remove_fields(self, field_names: List[str]):
     """Remove fields from the log.
 
     Args:
-        field_names (list[str]): list of field names to remove.
+        field_names (List[str]): list of field names to remove.
     """
     assert not (ns:=set(field_names)-set(list(self.static_configs)+self.grid_fields+self.metric_fields)), \
       f'Field names {ns} not in any of static {list(self.static_configs)}, grid {self.grid_fields}, or metric {self.metric_fields} field names.'
@@ -511,11 +508,11 @@ class ExperimentLog:
     self.df = self.df.reset_index(grid_ns, drop=True)   # remove grid field
     self.df = self.df.drop(columns=metric_ns)           # remove metric field
 
-  def rename_fields(self, name_map: dict[str, str]):
+  def rename_fields(self, name_map: Dict[str, str]):
     """Rename fields in the log.
 
     Args:
-        name_map (dict[str, str]): Mapping of old field names to new field names.
+        name_map (Dict[str, str]): Mapping of old field names to new field names.
     """
     assert not (ns:=set(name_map)-set(list(self.static_configs)+self.grid_fields+self.metric_fields)), \
       f'Field names {ns} not in any of static {list(self.static_configs)}, grid {self.grid_fields}, or metric {self.metric_fields} field names.'
@@ -536,14 +533,14 @@ class ExperimentLog:
   # Merge ExperimentLogs.
   # -----------------------------------------------------------------------------
   
-  def log_conflict_resolver(self, other: ExperimentLog) -> tuple[ExperimentLog, ExperimentLog]:
+  def log_conflict_resolver(self, other: 'ExperimentLog') -> Tuple['ExperimentLog', 'ExperimentLog']:
     """Summarize conflicts and accept user input for resolution.
 
     Args:
         other (ExperimentLog): Target log to merge with self.
         
     Returns:
-        tuple[ExperimentLog, ExperimentLog]: Resolved logs (self, other).
+        Tuple[ExperimentLog, ExperimentLog]: Resolved logs (self, other).
     """
     if self==other: return self, other
     print(f'\nConflict detected between logs: ')
@@ -676,7 +673,7 @@ class ExperimentLog:
     return self, other
     
   
-  def __merge_one(self, other: ExperimentLog, same=True) -> ExperimentLog:
+  def __merge_one(self, other: 'ExperimentLog', same=True) -> 'ExperimentLog':
     '''
     Merge two logs into self.
     - The order of grid_fields follows self
@@ -709,7 +706,7 @@ class ExperimentLog:
 
     return self
     
-  def merge(self, *others: ExperimentLog, same: bool=True):
+  def merge(self, *others: 'ExperimentLog', same: bool=True):
     """Merge multiple logs into self.
 
     Args:
@@ -721,12 +718,12 @@ class ExperimentLog:
       self.__merge_one(other, same=same)
 
   @staticmethod
-  def merge_tsv(*log_files: str, save_path: str|None=None, same: bool=True) -> ExperimentLog:
+  def merge_tsv(*log_files: str, save_path: Optional[str]=None, same: bool=True) -> 'ExperimentLog':
     """Merge multiple logs into one from tsv file paths.
 
     Args:
         *logs_path (str): Path to logs.
-        save_path (str): Path to save merged log.
+        save_path (Optional[str]): Path to save merged log.
         same (bool, optional): Whether to raise error when logs are not of matching experiments. Defaults to True.
     """
     base, *logs = [ExperimentLog.from_tsv(f, parse_str=False) for f in log_files]
@@ -736,12 +733,12 @@ class ExperimentLog:
     return base
 
   @staticmethod
-  def merge_folder(logs_path: str, save_path: str|None=None, same: bool=True) -> ExperimentLog:
+  def merge_folder(logs_path: str, save_path: Optional[str]=None, same: bool=True) -> 'ExperimentLog':
     """Merge multiple logs into one from tsv files in folder.
 
     Args:
         logs_path (str): Folder path to logs.
-        save_path (str | None, optional): Path to save merged log. Defaults to None.
+        save_path (Optional[str], optional): Path to save merged log. Defaults to None.
         same (bool, optional): Whether to raise error when logs are not of matching experiments. Defaults to True.
     """
     log_files = glob.glob(os.path.join(logs_path, "*.tsv"))
@@ -794,7 +791,7 @@ class ExperimentLog:
     metric_dict = {k:(v.iloc[0] if not (v:=cfg_matched_df[k]).empty else None) for k in self.metric_fields}
     return metric_dict
 
-  def is_same_exp(self, other: ExperimentLog)->bool:
+  def is_same_exp(self, other: 'ExperimentLog')->bool:
     """Check if both logs have same config fields.
 
     Args:
@@ -807,7 +804,7 @@ class ExperimentLog:
     return fields(self)==fields(other)
     
     
-  def melt_and_explode_metric(self, df: pd.DataFrame|None=None, step: int|None=None, dropna: bool=True)->pd.DataFrame:
+  def melt_and_explode_metric(self, df: Optional[pd.DataFrame]=None, step: Optional[int]=None, dropna: bool=True)->pd.DataFrame:
     """Melt and explode metric values in DataFrame.
     
     Melt column (metric) names into 'metric' field (multi-index) and their values into 'metric_value' columns.
@@ -815,8 +812,8 @@ class ExperimentLog:
     If step is specified, only that step is selected, otherwise all steps are exploded.
     
     Args:
-        df (pd.DataFrame | None, optional): Base DataFrame to operate over. Defaults to None.
-        step (int | None, optional): Specific step to select. Defaults to None.
+        df (Optional[pd.DataFrame], optional): Base DataFrame to operate over. Defaults to None.
+        step (Optional[int], optional): Specific step to select. Defaults to None.
         dropna (bool, optional): Whether to drop rows with NaN metric values. Defaults to True.
 
     Returns:
@@ -861,7 +858,7 @@ class ExperimentLog:
   def __getitem__(self, config: Mapping[str, Any]) -> dict:
     return self.get_metric(config)
 
-  def __eq__(self, other: ExperimentLog) -> bool:
+  def __eq__(self, other: 'ExperimentLog') -> bool:
     return self.is_same_exp(other)
 
   def __len__(self):
@@ -920,13 +917,13 @@ class Experiment:
   def __init__(self, 
                exp_folder_path: str,
                exp_function: ExpFunc,
-               exp_metrics: list | None = None,
-               total_splits: int | str = 1, 
-               curr_split: int | str = 0,
+               exp_metrics: Optional[list] = None,
+               total_splits: Union[int, str] = 1, 
+               curr_split: Union[int, str] = 0,
                configs_save: bool = False,
                checkpoint: bool = False,
                filelock: bool = False,
-               timeout: float | None = None
+               timeout: Optional[float] = None
     ):
     
     if checkpoint:
