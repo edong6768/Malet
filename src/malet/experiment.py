@@ -222,10 +222,13 @@ class ExperimentLog:
       
   
   @property
-  def grid_fields(self): return list(self.df.index.names) if self.df.index.names!=[None] else []
-  
+  def grid_fields(self): return list(self.df.index.names) if self.df.index.names!=[None] else []  
+
   @property
   def metric_fields(self): return list(self.df)
+
+  def grid_dict(self) -> Dict[str, Any]:
+    return {k: sorted(set(self.df.index.get_level_values(k))) for k in self.grid_fields}
   
   # Constructors.
   # -----------------------------------------------------------------------------  
@@ -464,34 +467,26 @@ class ExperimentLog:
       return None
     df[new_column_name] = df.apply(lambda df: mapper(*[df[c] for c in fn_arg_fields]), axis=1)
     return df
-
-  def add_computed_metric(self, new_metric_name: str, fn: Callable, *fn_arg_fields: str):
-    """Add new metric computed from existing metrics in self.df.
-
-    Args:
-        new_metric_name (str): Name of the new metric field.
-        fn (Callable): Function to compute new metric field.
-        *fn_arg_fields (str): Field names to be used as arguments for the function.
-    """
-    self.df = self.__add_column(self.df, new_metric_name, fn, *fn_arg_fields)
     
-  def add_derived_index(self, new_index_name: str, fn: Callable, *fn_arg_fields: str):
-    """Add new index field computed from existing fields in self.df.
+  def derive_field(self, new_field_name: str, fn: Callable, *fn_arg_fields: str, is_index: bool = False):
+    """Add new field computed from existing fields in self.df.
 
     Args:
-        new_index_name (str): Name of the new grid field.
-        fn (Callable): Function to compute new index field.
+        new_field_name (str): Name of the new field.
+        fn (Callable): Function to compute new field.
         *fn_arg_fields (str): Field names to be used as arguments for the function.
+        is_index (bool, optional): Whether to add field as index. Defaults to False.
     """
     df = self.df.reset_index(self.grid_fields)
-    df = self.__add_column(df, new_index_name, fn, *fn_arg_fields)
-    self.df = df.set_index([*self.grid_fields, new_index_name])
+    df = self.__add_column(df, new_field_name, fn, *fn_arg_fields)
+    new_grid_fields = [*self.grid_fields, new_field_name] if is_index else self.grid_fields
+    self.df = df.set_index(new_grid_fields)
     
-  def remove_fields(self, field_names: List[str]):
-    """Remove fields from the log.
+  def drop_fields(self, field_names: List[str]):
+    """Drop fields from the log.
 
     Args:
-        field_names (List[str]): list of field names to remove.
+        field_names (List[str]): list of field names to drop.
     """
     assert not (ns:=set(field_names)-set(list(self.static_configs)+self.grid_fields+self.metric_fields)), \
       f'Field names {ns} not in any of static {list(self.static_configs)}, grid {self.grid_fields}, or metric {self.metric_fields} field names.'
