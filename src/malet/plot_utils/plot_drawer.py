@@ -56,7 +56,7 @@ def ax_draw_curve(ax: Axes,
     else:
         if unif_xticks:
             tick_values = np.arange(len(x_values))
-            ax.set_xticks(tick_values, x_values, fontsize=10, rotation=45)
+            ax.set_xticks(tick_values, x_values, fontsize=10)#, rotation=45)
             
         artists += ax.plot(tick_values, metric_values, label=label, color=color, linewidth=linewidth, 
                             marker=marker, markersize=markersize, markevery=markevery, linestyle=linestyle)
