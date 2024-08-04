@@ -613,8 +613,22 @@ class ExperimentLog:
       if ntt:
         print(f'\n[bold][Handle missing fields in {ts}][/bold] (Default: same/first value of {fs})')
         for k in ntt:
+          tab = Table()
+          tab.add_column('Field', style='bold')
+          tab.add_column(f'[blue]Self[/blue] ({self_post[:-4]})')
+          tab.add_column(f'[green]Other[/green] ({othr_post[:-4]})')
+          
+          if tlog==self:
+            tab.add_row(f'{k:{ln_k}s}', 
+                             rd(f'{str(self_d["dict"].get(k, "")):{ln_s}s}', 0),
+                                f'{str(other_d["dict"].get(k, "")):{ln_o}s}')
+          elif tlog==other:
+            tab.add_row(f'{k:{ln_k}s}', 
+                                f'{str(self_d["dict"].get(k, "")):{ln_s}s}',
+                             rd(f'{str(other_d["dict"].get(k, "")):{ln_o}s}', 0))
+          
           i_cfl += 1
-          print(f'│\n├─[{i_cfl}/{n_cfl}] [bold]({k})[/bold]')
+          print(f'│\n├─[{i_cfl}/{n_cfl}] [bold]({k})[/bold]', tab)
           # set default value
           dflt = False
           dflt_val = fd['dict'].get(k, "")
@@ -634,7 +648,7 @@ class ExperimentLog:
           # process for each modes
           if isinstance(mode, int):
             if modes[mode]=='Add new value':
-              print(f"│   ({mode}) Add new value ({fs} {'=' if k in fd['sttc_d'] else 'in'} {fd['dict'].get(k, '')})")
+              print(f"│   ({mode}) Add new value")
               new_val = str2value(input(f"│   ↳ "))
               if new_val:
                 tlog.static_configs[k] = new_val
@@ -924,6 +938,7 @@ class Experiment:
     if checkpoint:
       assert filelock, "argument 'filelock' should be set to True when checkpointing."
     
+    self.name = exp_folder_path.split('/')[-1]
     self.exp_func = exp_function
 
     self.configs_save = configs_save
@@ -934,13 +949,13 @@ class Experiment:
     do_split = isinstance(total_splits, int) and total_splits>1 or isinstance(total_splits, str)
     cfg_file, tsv_file, _ = self.get_paths(exp_folder_path, split=curr_split if do_split else None)
     
-    self.configs = self.__get_and_split_configs(cfg_file, total_splits, curr_split)
+    self.configs = self.__get_and_split_configs(cfg_file, total_splits, curr_split, self.name)
     self.log = self.__get_log(tsv_file, self.infos+exp_metrics, filelock)
     
     self.__check_matching_static_configs()
     
   @staticmethod
-  def __get_and_split_configs(cfg_file, exp_bs, exp_bi):
+  def __get_and_split_configs(cfg_file, exp_bs, exp_bi, name):
     
     configiter = ConfigIter(cfg_file)
     
@@ -953,14 +968,14 @@ class Experiment:
       if exp_bs>1:
         configiter.filter_iter(lambda i, _: i%exp_bs==exp_bi)
       
-      logging.info(f'Experiment : {configiter.name} (split : {exp_bi+1}/{exp_bs})')
+      logging.info(f'Experiment : {name} (split : {exp_bi+1}/{exp_bs})')
       
     # else split across certain study field
     elif exp_bs in configiter.grid_fields:
       exp_bi = [*map(str2value, exp_bi.split())]
       configiter.filter_iter(lambda _, d: d[exp_bs] in exp_bi)
       
-      logging.info(f'Experiment : {configiter.name} (split : {exp_bi}/{configiter.grid_dict[exp_bs]})')
+      logging.info(f'Experiment : {name} (split : {exp_bi}/{configiter.grid_dict[exp_bs]})')
     
     return configiter
       
