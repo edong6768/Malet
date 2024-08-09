@@ -1057,6 +1057,7 @@ class Experiment:
       for i, config in enumerate(self.configs):
         
         if self.filelock: self.log.filelock.acquire() ##################################################################
+        self.log.load_tsv()
         
         metric_dict, info_dict = self.get_metric_info(config)
         
